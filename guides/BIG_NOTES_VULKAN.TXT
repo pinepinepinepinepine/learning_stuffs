@@ -82,3 +82,122 @@ The third parameter refers to a vk::DebugUtilsMessengerCallbackDataEXT struct co
 
 https://docs.vulkan.org/tutorial/latest/03_Drawing_a_triangle/00_Setup/03_Physical_devices_and_queue_families.html
         Scroll down to the isDeviceSuitable() example and the one below for some ideas on how to pick the most ideal GPU, or to filter them -- whatever!
+
+
+
+
+VUlkan doesn't have a "default framebuffer", so it requires an extension infrastructure that owns the buffers we're rendering before we visualize them on the screen.
+This infrastructure is known as the "SWAP CHAIN" and as a result of it not being built in by default, we have to explicitly create it.
+
+The swap chain is a queue of images that are waiting to be presented to the screen
+    The process is our application creates an image, and then it returns it to the queue.
+
+    The exact way the queue works, and the conditions for presenting the images from a queue depending on how the swap chain is set up.
+    However, the general purpose of the swap chain is to synchronize the presentation of the images with the refresh rate of the screen
+
+
+The first step to begin creating the swap chain is to check if our graphics card has support for the swap chain
+    Some graphics cards are designed for servers, and thus don't have any display output, for example.
+
+Due to image presentation being tied to the window system and its surface, swap chain isn't part of the vulcan core, and so we need to enable the device extension VK_KHR_swapchain (after checking if our device supports it)
+
+// This is the old code for finding the proper graphics index for the queue creation. Replaced with something similar (can check if it supports window surfacing)
+        // Start -- Check the tutorial website for a lambda function version.
+        vk::QueueFamilyProperties* graphicsQueueFamilyProperty = nullptr;
+        for ( vk::QueueFamilyProperties& queueFamily : queueFamilyProperties )
+        {
+            if ( ( queueFamily.queueFlags & vk::QueueFlagBits::eGraphics) != static_cast<vk::QueueFlags>(0) ) {
+                graphicsQueueFamilyProperty = &queueFamily;
+                break;
+            }
+        }
+
+        if ( !graphicsQueueFamilyProperty ) {
+            std::cout << "The physical device doesn't support the eGraphics queue family\n";
+            return;
+        }
+
+        // IF we want to check for another queue family with the physical device, like eCompute or whatever (idk), repeat this exact same logic -- the code above only returns a single queue family (whatever specified -- eGraphics)
+        // that ALSO includes the vk::DeviceQueueCreateInfo creation: make a seperate thing (like vk::DeviceQueueCreateInfo deviceComputeQueueCreateInfo) and assign it.
+        // the creation only makes ONE specific queue family -- if we want another queue family, we'd have to make two vk::DeviceQueueCreateInfo objects -- see // Start -> // End for the whole logic of one. Repeat for eCompute/another.
+        auto graphicsIndex = static_cast<uint32_t>( graphicsQueueFamilyProperty - queueFamilyProperties.data() ); // get the index by subtracting
+            // Keep your eyes peeled here, me.
+
+// Old code: just iterates instead of using bitwise.
+    bool checkDeviceQueueSupport_iterate( vk::raii::PhysicalDevice const& physicalDevice )
+    {
+        // Check if our device can support whatever queue family (check the tutorial website for a lambda function version):
+        // Everything in Vulkan uses a queue: from drawing to uploading textures, commands are submitted through a queue -- each family of queues allows only a subset of commands.
+        auto availableQueueFamilies = physicalDevice.getQueueFamilyProperties(); // Check/contains what queue families are supported by the device -- what queue families we can use with this device.
+        std::vector<vk::QueueFlagBits> requiredQueues { vk::QueueFlagBits::eGraphics, vk::QueueFlagBits::eCompute }; // maybe move this vector variable someplace else like w/ extensions? idk
+
+        for ( const auto& availableQueueFamily : availableQueueFamilies )
+        {
+            unsigned count = 0; // just some counter im using to check if this physical device supports all the required queue familys.
+            for ( const auto& requiredQueue : requiredQueues )
+            {
+                // we use & here (not ==) because & is able to check whether or not that specific flag is present within that bitmask, where bitmasks contain a bunch of other stuff -- acts as a filter.
+                if ( availableQueueFamily.queueFlags & requiredQueue )      // & checks if that flag bit (like eGraphics) is present within qavailableQueueFamily.queueFlags (which is a bitmask(*1) of integers representing states)
+                {
+                    if ( ++count >= requiredQueues.size() ) { // If we find that corresponding bit (eGraphics), then our device supports our graphics (doesnt have to be eGraphics -- example) -- increment count until we find all dependencies
+                        std::cout << physicalDevice.getProperties().deviceName << " supports all our required queue families! (ITERATION)\n";
+                        return true;
+                    } // (*1)A bitmask is just a integer where each bit/integer represents a flag -- it's just a way to pack a series of bools/flags quickly and w/o taking too much space.
+                }
+            }
+        }
+        return false;
+    }
+
+
+
+// Instead of filling fields one by one w/o a function (simply physicalDevice.getSurfaceCapabilitiesKHR() within), this is how we PREVIOUSLY had to query for support (literally populate the 3 fields one by one)
+    SwapChainSupportDetails querySwapChainSupport( VkPhysicalDevice phys_device )
+    {
+        SwapChainSupportDetails details;
+
+
+        // This function takes the physical device and the window surface into account to determine the supported capabilities of using swap chain.
+        // For any other support querying (checking) functions, the first two parameters are always the same as they're core to determining support for swap chain. Last parameter is an output back to our struct so we can store the capabilities of our application's swap chain.
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR( phys_device, *window_surface, &details.capabilities ); // VK RAII wraps around the underlying base object: so for window_surface, we use * to refer to the raw VkSurfaceKHR, non VK-RAII window surface (this function doesnt take vk raii)
+
+        uint32_t formatCount;
+        // Next we search/query for the supported surface formats (since this is another support query, we pass the same two parameters for the same reason)
+        vkGetPhysicalDeviceSurfaceFormatsKHR( phys_device, *window_surface, &formatCount, nullptr );
+        if ( formatCount > 0 )
+            details.formats.resize(formatCount);
+        vkGetPhysicalDeviceSurfaceFormatsKHR( phys_device, *window_surface, &formatCount, details.formats.data() );         // google why we need two. odd?
+
+        // Finally we query the supported presentation modes in the exact same fashion as w/ above (suppose we need the two functions for getting count -> resize -> actually populate data)
+        vkGetPhysicalDeviceSurfacePresentModesKHR( phys_device, *window_surface, &formatCount, nullptr );
+        if ( formatCount > 0 )
+            details.presentModes.resize(formatCount);
+        vkGetPhysicalDeviceSurfacePresentModesKHR( phys_device, *window_surface, &formatCount, details.presentModes.data() );         // google why we need two. odd?
+
+
+        // After this, our SwapChainSupportDetails is now populated: now we can verify if our device is suitable (follow up isDeviceSuitable()) for swap chain support.
+
+        return details;
+    }
+
+// Here's the PREVIOUSLY used struct, too
+    struct SwapChainSupportDetails
+    {
+        // There are 3 kinds of properties we need to check in order to see if swap chain is compatible with our window surface.
+        VkSurfaceCapabilitiesKHR capabilities;          // Basic surface capabilities (min/max number of images in swap chain, min/max width and height of images)
+        std::vector<VkSurfaceFormatKHR> formats;        // Surface formats (pixel format, color space)
+        std::vector<VkPresentModeKHR> presentModes;     // Available presentation modes
+    };
+
+
+// And to check if we support it:
+
+        bool supports_SwapChain = false;
+        // For some reason, I assume because swap chain IS a required extension here, we have to check if we actually have support for the swap chain extension altogether before determining its specific, supported capabilities.
+        if ( supports_required_extensions ) {
+            SwapChainSupportDetails swapChainSupport = querySwapChainSupport( *physicalDevice );
+
+            // If it's empty, it means we don't have support -- see querySwapChainSupport() (resize then appends support )
+            supports_SwapChain = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
+            std::cout << deviceProperties.deviceName << " supports swap chain!\n";
+        } (and then adding '&& supports_SwapChain' at the return)

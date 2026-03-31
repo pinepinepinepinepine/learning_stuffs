@@ -1,6 +1,5 @@
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
-#define GLFW_INCLUDE_VULKAN
-
+#define GLFW_INCLUDE_VULKAN        // REQUIRED only for GLFW CreateWindowSurface. you could ditch the header right below this in exchange for this #define.
 
 #if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES)
 #	include <vulkan/vulkan_raii.hpp>
@@ -8,10 +7,16 @@
 import vulkan_hpp;
 #endif
 
-#define GLFW_INCLUDE_VULKAN        // REQUIRED only for GLFW CreateWindowSurface.
-
-#include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
+#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_raii.hpp>
+#include <tiny_obj_loader.h>
+
+#define GLFW_EXPOSE_NATIVE_WIN32    // Required to define for the #include below -- allows GLFW to show Windows handles (HWND/hInstance access)
+#include <GLFW/glfw3native.h>       // Gives GLFW Native interface for this OS (so allows Win32 Functions on GLFW windows)
+
+#define VK_USE_PLATFORM_WIN32_KHR // Similarily with GLFW, this specifies to Vulkan that you want to get Vulkan's WindowsOS-specific functions (VkWin32SurfaceCreateInfoKHR/vkCreateWin32SurfaceKHR - access to these functions from Vulkan)
+
 #include <tiny_obj_loader.h>
 
 #include <algorithm>
@@ -68,7 +73,6 @@ void some_handy_printer( vk::raii::Context* context, std::vector<const char*>* r
 
 
 
-
 class HelloTriangleApplication
 {
   public:
@@ -87,9 +91,18 @@ class HelloTriangleApplication
     //VkInstance instance;
     vk::raii::Instance instance = nullptr; // Handle to the vulkan instance (like win32's HWND!)
 
-    // Destruction order is declared in reverse from how theyre declared? debugMsg gets destroyed first, instance second.
+    // Destruction order is declared in reverse from how theyre declared? debugMsg gets destroyed first, instance second
     // this tells Vulkan about the callback function. You don't touch this. Vulkan internally handles it. Once its created, Vulkan knows about the callback. If it goes out of scope, the debug callback won't occur anymore.
     vk::raii::DebugUtilsMessengerEXT debugMessenger = nullptr;
+
+    // Vulkan isn't designed to interface directly with the window system on its own (GLFW, in our case).
+    // In order to establish that connection between Vulkan and the window system, we need to use the WSI (aka Window System Integration) extension.
+    // VkSurfaceKHR is an object that represents the type of surface to present rendered images to (there's other WSI objects, this is just one of them -- this is a INSTANCE level extension)
+    // This is already enabled for our instance by us using glfwGetRequiredInstanceExtensions -- it's present in the list. Within the list, there's some other WSI extensions, too.
+    // Create the window surface object AFTER our instance creation, because otherwise it can influence the physical device selection (if you're doing off-screen rendering, WSI isn't necessary btw)
+    vk::raii::SurfaceKHR window_surface = nullptr; // the CREATION of it relies on OS window system details, like for Windows (os) it'll need the HWND/HMODULE from Win32, so it actually represents VK_KHR_win32_surface on the Windows OS
+        // The USAGE of this variable is platform flexible, but the literal creation of it inherently relies on the OS: for linux, it represents/contains VK_KHR_xlib_surface (X11 OS)/VK_KHR_xcb_surface (XCB OS); on windows, VK_KHR_win32_surface.
+            // Furthermore, the "extensions this application has available print" shows VK_KHR_win32_surface because a) we're using Windows and b) it's automatically/specifically given from glfwRequiredExtensions (on linux, it'd show one of the two)
 
     vk::raii::PhysicalDevice physicalDevice = nullptr; // the PHYSICAL device -- the GPU, this stores the handle
     vk::raii::Device logicalDevice = nullptr; // the LOGICAL device: it's an interface to communicate with the GPU, this stores the requested QUEUES and GPU SPECIFIC EXTENSIONS+FEATURES
@@ -97,9 +110,9 @@ class HelloTriangleApplication
 
     // To enable extensions, you use this, but this isn't being elaborated on until later. Come back later again.
     std::vector<const char*> requiredDeviceExtension = {
-        vk::KHRSwapchainExtensionName }; // Originally, its a VK_KHR_swapchain macro, but the vk:: is just a wrapper -- theyre equivalent.
+        vk::KHRSwapchainExtensionName }; // Originally, its a VK_KHR_swapchain macro, but the vk:: is just a wrapper -- theyre equivalent. Use the VK_KHR_SWAPCHAIN_EXTENSION_NAME macro to have the compiler check for misspellings
         /// the VK_KHR_swapchain extension is required for presenting rendered images from the device to the window.
-
+            // See big_notes for some added information.
 
     void initWindow() {
 
@@ -118,17 +131,20 @@ class HelloTriangleApplication
         window = glfwCreateWindow( WIDTH, HEIGHT, "Vulkan", nullptr, nullptr );
     }
 
-
-
     void initVulkan() {
         // The first step to using Vulkan is to initialize the Vulkan library by creating an instance.
         // The instance is the connection between your application and the Vulkan library.
         // Creating it involves specifying details about your application to the driver.
         createInstance();
         setupDebugMessenger(); // sets up our custom made debug callback
+
+        createWindowSurface(); // actually creates our window surface to have Vulkan communicate with the Window
+
         pickPhysicalDevice(); // this picks the graphics card in the system that supports the features we need.
         createLogicalDevice(); // this describes what features we want to actually use, and what queues to create
+        createSwapChain(); // create swap chain to have images actually render within the window
     }
+
 
     void mainLoop()
     {
@@ -151,6 +167,23 @@ class HelloTriangleApplication
 
         glfwDestroyWindow( window ); // Make sure to also destroy the GLFW objects since we also used a creation function on it
         glfwTerminate(); // Call this whenever we are COMPLETELY finished with the GLFW: it destroys EVERYTHING glfw related.
+    }
+
+    // broken garbage win32, fix later, maybe use the general, platform-agnostic one provided. (the example's only for learning purposes)
+    void createWindowSurface()
+    {
+        // vk::Win32SurfaceCreateInfoKHR createInfo{ .hinstance = GetModuleHandle(nullptr), .hwnd      = glfwGetWin32Window(window) };
+        // For WindowsOS specific, the above implementation is similar to VkSurfaceKHR but ONLY usable w/ WindowsOS (vkSurfaceKHR is a general, platform agnostic object, it contains linux's/windows/macs version of Win32SurfaceCreateInfoKHR)
+        VkSurfaceKHR _surface;
+
+        // First parameter is the instance to create the surface in; Second parameter is the pointer to the actual, specific window itself within that instance;
+        // third is for custom allocators, google what it means; fourth is the output parameter that holds the handle of the created window surface.
+        if ( glfwCreateWindowSurface(*instance, window, nullptr, &_surface) != 0 ) { // if the createFunction returns anything but 0, an error occurs ( 0 == VK_SUCCESS )
+            throw std::runtime_error("failed to create window surface!");
+        }
+        // GLFW doesn't offer a special function for destroying the window surface, but wrapping it (encapsulating/using) with a vk::rai::SurfaceKHR object (window_surface) will let Vulkan automatically delete it with RAII when out of scope.
+        window_surface = vk::raii::SurfaceKHR(instance, _surface);
+
     }
 
 
@@ -192,53 +225,62 @@ class HelloTriangleApplication
     }
 
 
+    bool checkDeviceQueueSupport_bitwise( vk::raii::PhysicalDevice const& physicalDevice )
+    {
+        // Check if our device can support whatever queue family (check the tutorial website for a lambda function version):
+        // Everything in Vulkan uses a queue: from drawing to uploading textures, commands are submitted through a queue -- each family of queues allows only a subset of commands.
+        auto availableQueueFamilies = physicalDevice.getQueueFamilyProperties(); // Check/contains what queue families are supported by the device -- what queue families we can use with this device.
+        // vk::QueueFlags is a container for queue flag bits: we are saying "the required queues are eGraphics and eCompute" here -- we use | (BITWISE OR), it's weird.
+        vk::QueueFlags requiredQueues = vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute; // maybe move this vector variable someplace else like w/ extensions? idk
+            // For bits, think of it | as "I'm turning this bit on", not "either or"; & is used for comparing and checking if a flag is enabled (it's kinda backwards)
+
+        for ( const auto& availableQueueFamily : availableQueueFamilies )
+        {
+            if ( availableQueueFamily.queueFlags & requiredQueues ) { // bitmasks contain data for MULTIPLE bools (flag bits in our case), hence why we don't have to iterate over multiple requiredQueues like w/ _iterate() -- we just check if it contains all of them.
+                std::cout << physicalDevice.getProperties().deviceName << " supports all our required queue families! (BITWISE)\n";
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    bool checkDeviceExtensionSupport( vk::raii::PhysicalDevice const& physicalDevice )
+    {
+        // Check if our device can support whatever extensions (Check the tutorial website for a lambda function version):
+        auto availableDeviceExtensions = physicalDevice.enumerateDeviceExtensionProperties(); // Checks what extensions are supported by the device
+        unsigned extension_count = 0; // just some counter im using to check if this physical device supports all the required extensions.
+        for ( const auto& availableDeviceExtension : availableDeviceExtensions )
+        {
+            for ( const auto& requiredDeviceExtension : requiredDeviceExtension )
+            {
+                if ( strcmp( availableDeviceExtension.extensionName, requiredDeviceExtension ) == 0 ) {
+                    extension_count++;
+                    break;
+                }
+            }
+        }
+        if ( extension_count >= requiredDeviceExtension.size() ) {
+            std::cout << physicalDevice.getProperties().deviceName << " supports all our required extensions!\n";
+            return true;
+        }
+        return false;
+    }
+
+
+
     bool isDeviceSuitable( vk::raii::PhysicalDevice const& physicalDevice )
     {
         auto deviceProperties = physicalDevice.getProperties();  // can .Name/.ID/.Type
-        auto deviceFeatures = physicalDevice.getFeatures();      // for optional features like 64 bit floats, texture compression, etc.
-
 
         // Check if our device can support this vulkan's API version:
         bool supportsVulkan1_3 = deviceProperties.apiVersion >= vk::ApiVersion13;
         if ( supportsVulkan1_3 )
             std::cout << deviceProperties.deviceName << " supports ApiVersion13!\n";
 
+        bool supports_required_queues = checkDeviceQueueSupport_bitwise( physicalDevice );
 
-        // Check if our device can support whatever queue family (check the tutorial website for a lambda function version):
-        // Everything in Vulkan uses a queue: from drawing to uploading textures, commands are submitted through a queue -- each family of queues allows only a subset of commands.
-        auto queueFamilies = physicalDevice.getQueueFamilyProperties(); // Check/contains what queue families are supported by the device -- what queue families we can use with this device.
-        bool device_supports_our_graphics = false;
-        for ( const auto& queueFamily : queueFamilies )
-        {
-            if ( queueFamily.queueFlags & vk::QueueFlagBits::eGraphics ) { // & check if eGraphics bit is present within queueFamily.QueueFlags (which is a bitmask* of integers representing states)
-                device_supports_our_graphics = true; // If we find that corresponding bit (eGraphics), our device supports our graphics (doesnt have to be eGraphics -- example)
-                std::cout << deviceProperties.deviceName << " supports our queue family!\n";
-                break; // *A bitmask is just a integer where each bit/integer represents a flag -- it's just a way to pack a series of bools/flags quickly and w/o taking too much space.
-            } // we use & here (not ==) because & is able to check whether or not that specific flag is present within that bitmask, where bitmasks contain a bunch of other stuff -- acts as a filter.
-        }
-
-
-        // Check if our device can support whatever extensions (Check the tutorial website for a lambda function version):
-        auto availableDeviceExtensions = physicalDevice.enumerateDeviceExtensionProperties(); // Check/contains what extensions are supported by the device
-        unsigned extension_count = 0; // just some counter im using.
-        bool supportsAllRequiredExtensions = false;
-        for ( const auto& availableDeviceExtension : availableDeviceExtensions )
-        {
-            for ( const auto& requiredDeviceExtension : requiredDeviceExtension )
-            {
-                if ( strcmp( availableDeviceExtension.extensionName, requiredDeviceExtension ) == 0 )
-                {
-                    extension_count++;
-                    break;
-                }
-            }
-        }
-        if ( extension_count == requiredDeviceExtension.size() )
-        {
-            supportsAllRequiredExtensions = true;
-            std::cout << deviceProperties.deviceName << " supports our required extensions!\n";
-        }
-
+        bool supports_required_extensions = checkDeviceExtensionSupport( physicalDevice );
 
         // Check if our device can support whatever features
         // We need to grab ahold of this physical device's vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>(), so we use a template function
@@ -249,12 +291,15 @@ class HelloTriangleApplication
         if ( supportsRequiredFeatures )
             std::cout << deviceProperties.deviceName << " supports our required features!\n";
 
-
         // Extensions and Features are similar: extensions are OPTIONAL addons and are not guaranteed to exist for every GPU, whereas features are CORE operations that the GPU can do, controlled by Vulkan.
-        // Features are added with every Vulkan update.
+        // Features are added with every Vulkan update. Features are like 64 bit floats, texture compression, etc.
 
-        bool is_device_suitable = supportsVulkan1_3 && device_supports_our_graphics && supportsAllRequiredExtensions && supportsRequiredFeatures;
-        std::cout << deviceProperties.deviceName << ( is_device_suitable ? " supports everything!\n" : "isn't suitable\n" );
+
+
+        // See the function calls for clarification.
+        bool is_device_suitable = supportsVulkan1_3 && supports_required_queues && supports_required_extensions && supportsRequiredFeatures;
+
+        std::cout << deviceProperties.deviceName << ( is_device_suitable ? " supports everything!\n" : "isn't suitable.\n" );
 
         return is_device_suitable;
     }
@@ -275,6 +320,7 @@ class HelloTriangleApplication
 			throw std::runtime_error("failed to find a suitable GPU!");
 		}
 		physicalDevice = *devIter; // If we have multiple GPUs, the recommended way is to filter them based on whats better -- see big_notes for some examples. We're just choosing the first one found.
+        std::cout << "using " << physicalDevice.getProperties().deviceName << " as our physical device!\n";
 	}
 
 
@@ -282,30 +328,26 @@ class HelloTriangleApplication
     {
         std::vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties(); // We're reusing this: we just need to see what our selected physical device can queue.
 
-        // Start -- Check the tutorial website for a lambda function version.
-        vk::QueueFamilyProperties* graphicsQueueFamilyProperty = nullptr;
-        for ( vk::QueueFamilyProperties& queueFamily : queueFamilyProperties )
+        // get the first index into queueFamilyProperties which supports both graphics and present
+        uint32_t queueIndex = ~0;
+        for ( uint32_t qfpIndex = 0; qfpIndex < queueFamilyProperties.size(); qfpIndex++ )
         {
-            if ( ( queueFamily.queueFlags & vk::QueueFlagBits::eGraphics) != static_cast<vk::QueueFlags>(0) ) {
-                graphicsQueueFamilyProperty = &queueFamily;
+        if ( (queueFamilyProperties[qfpIndex].queueFlags & vk::QueueFlagBits::eGraphics ) && // If the queue family supports eGraphics,
+                physicalDevice.getSurfaceSupportKHR( qfpIndex, *window_surface ) )           // and this queue family supports presenting images to the window surface...
+            {
+                // then we've found a queue family that supports both graphics and present, set queueIndex as that queue we just found.
+                queueIndex = qfpIndex;
                 break;
             }
         }
-
-        if ( !graphicsQueueFamilyProperty ) {
-            std::cout << "The physical device doesn't support the eGraphics queue family\n";
-            return;
+        if (queueIndex == ~0) {
+            throw std::runtime_error("Could not find a queue for graphics and present -> terminating");
         }
 
-        // IF we want to check for another queue family with the physical device, like eCompute or whatever (idk), repeat this exact same logic -- the code above only returns a single queue family (whatever specified -- eGraphics)
-        // that ALSO includes the vk::DeviceQueueCreateInfo creation: make a seperate thing (like vk::DeviceQueueCreateInfo deviceComputeQueueCreateInfo) and assign it.
-        // the creation only makes ONE specific queue family -- if we want another queue family, we'd have to make two vk::DeviceQueueCreateInfo objects -- see // Start -> // End for the whole logic of one. Repeat for eCompute/another.
-        auto graphicsIndex = static_cast<uint32_t>( graphicsQueueFamilyProperty - queueFamilyProperties.data() ); // get the index by subtracting
-            // Keep your eyes peeled here, me.
 
         // to actually specify the queues to be created, we need to feed data into a vk::DeviceQueueCreateInfo struct, similarily with createInfo/createDebugMessenger creation -- common thing in Vulkan.
         float queuePriority = 0.5f; // Vulkan allows us to assign priorities for the queue to affect scheduling -- this is required even if we've a single queue. (range of 0.0 - 1.0)
-        vk::DeviceQueueCreateInfo deviceQueueCreateInfo { .queueFamilyIndex = graphicsIndex, // This also says what this queueFamily creation represents (so eGraphics for this example)
+        vk::DeviceQueueCreateInfo deviceQueueCreateInfo { .queueFamilyIndex = queueIndex, // This also says what this queueFamily creation represents (so eGraphics for this example) [ALL THIS DOES IS SET THE ACTUAL QUEUE FAMILY TYPE]
                                                           .queueCount = 1, // how many queues we want to create in this family
                                                           .pQueuePriorities = &queuePriority }; // Queue Priority only matters within the same family, not across different families:
                                     // pQueuePriorities IS A VECTOR/ARRAY THAT HOLDS MULTIPLE QUEUE PRIORITIES; so this is valid { 0.8, 0.5, 1.0 } ORDER MATTERS, FIRST QUEUE IS 0.8, THIRD IS 1.0
@@ -339,15 +381,67 @@ class HelloTriangleApplication
             .ppEnabledExtensionNames = requiredDeviceExtension.data() };                    // the list of the names of the extensions to enable (HOWEVER, THIS DIFFERS FROM vk::InstanceCreateInfo BECAUSE THESE EXTENSIONS ARE GPU EXTENSIONS, NOT VULKAN API EXTENSIONS.)
             // some vulkan update made device-specific and instance validation layers inseperable, so they're now all vulkan instance layers (so adding .enabledLayerCount + ppEnabledLayerNames is obsolete, those go in instance creation)
                 // the EXTENSIONS are seperate, the LAYERS are not (layers are not shown above w/ vk::DeviceCreateInfo, its just an added member variable).
+
         // The final step to create the logical device is to just give our original vk::raii::Device device (member variable to this struct) value!
         // the first param is the physical device, and the second is the info we just gave it (specifying what queues, and device-specific extensions and features to use)
         logicalDevice = vk::raii::Device( physicalDevice, deviceCreateInfo ); // logical devices operate through the physical device and as a result don't interact directly with the instance, which is why we're not passing instance as a param.
             // instance = the ENTIRE Vulkan API instance; physical device = the actual graphics card; logical device = the interface of the GPU.
 
         // First parameter is the logical device which we created the queue with (the queue exists, we're just giving it a handle, it's stored inside logical_device)
-        // The second parameter is an int which represents what family index we want (so we want graphicsIndex here)
+        // The second parameter is an int which represents what family index we want (so we want graphicsIndex here, we changed it to queueIndex to check if that queue family supports both eGraphics+Presenting Images to surfaces)
         // Third parameter: queue familys can have multiple queues, we're just selecting what exact queue we want in that family (starts from 0, we have 1 .QueueCount within the eGraphics family, so 0)
-        graphicsQueue = vk::raii::Queue( logicalDevice, graphicsIndex, 0 ); // P.S, we're passing the second param from earlier (not from the logical_device itself) because vulkan doesn't store it.
+        graphicsQueue = vk::raii::Queue( logicalDevice, queueIndex, 0 ); // P.S, we're passing the second param from earlier (not from the logical_device itself) because vulkan doesn't store it.
+    }
+
+
+    void createSwapChain()
+    {
+        // There are 3 kinds of properties we need to check in order to see if swap chain is compatible with our window surface.
+        // VkSurfaceCapabilitiesKHR capabilities;          // Basic surface capabilities (min/max number of images in swap chain, min/max width and height of images)
+        // std::vector<VkSurfaceFormatKHR> formats;        // Surface formats (pixel format, color space)
+        // std::vector<VkPresentModeKHR> presentModes;     // Available presentation modes
+
+        // It is important that we only try to query for swap chain support after verifying that the extension is available.
+        // If we don't have the required extension to begin with (VK_KHR_swapchain), it'll be undefined behaviour (potential crashes) as we're checking... garbage.
+        // PhysicalDevice was already determined to have the support, so we can freely continue -- if we didn't have a supported GPU, our program would crash from throw std::runtime_error("failed to find a suitable GPU!"); in pickPhysicalDevice()
+
+        // The non-RAII way of getting ahold of these. third parameter is an output just to store a SurfaceCapabilitiesKHR object -- you'd do the same but vkGetPhysicalDeviceSurfaceFormats/PresentModesKHR() for the 2 others.
+        // vkGetPhysicalDeviceSurfaceCapabilitiesKHR( physicalDevice, window_surface, &details.capabilities ); // IF using this w/ a VK::RAII object, like window_surface is VK::RAI, use *window_surface to convert window_surface to a non-vk-raii object.
+
+        // The idea is that we're getting the supported properties of the specific window surface on the specific physical device
+        VkSurfaceCapabilitiesKHR windowSurface_Capabilities = physicalDevice.getSurfaceCapabilitiesKHR( window_surface );   // adding operator*window_surface is equivalent if window_surface is a non-pointer, vk::rai object.
+        std::vector<vk::SurfaceFormatKHR> availableFormats = physicalDevice.getSurfaceFormatsKHR( window_surface );         // this is because it makes the VK::RAII window_surface object back to its non VK::RAII object
+        std::vector<vk::PresentModeKHR> availablePresentModes = physicalDevice.getSurfacePresentModesKHR( window_surface ); // so, (object type vk::raii::SurfaceKHR) *window_surface is implicitly converted to (object type vkSurfaceKHR) window_surface
+            // For this application alone (drawing a triangle), swap chain support is enough if, for the window surface, there's atleast one supported image format, and one supported presentation mode.
+
+        // In order to optimally choose the best settings for our swap chain to utilize, we have to consider, then choose the best from these 3 types of settings:
+            // 1. Surface format (color depth); 2. Presentation mode (conditions for "swapping" images to the screen); 3. Swap extent (resolution of images in swapchain).
+
+
+    }
+
+    // Function to choose the surface format out of this device's available formats
+    vk::SurfaceFormatKHR chooseSwapSurfaceFormat( const std::vector<vk::SurfaceFormatKHR>& availableFormats )
+    {
+        assert(!availableFormats.empty());
+
+        // vk::SurfaceFormatKHR contains a 'format' and 'colorSpace' member variable.
+            // format - stores the color channel and types. (kinda like that thing in win32 where it stores color + alpha type)
+                // for example, 'vk::Format::eB8G8R8A8Srgb' means we're storing Blue, Green, Red, and Alpha channels (in that order) with 8bit unsigned integers, totalling 32bits per pixel.
+                    // The final portion (Srgb) is the color space + gamma curve for interpreting pixels, but the member variable colorSpace is still present because Vulkan seperates them.
+            // colorSpace - which affects the presentation and interpretation on the window: sets a colorSpace to use
+                // the colorSpace we're using is probably gonna be SRGB (because it's results are better, so if it's available, use it): vk::Format::eB8G8R8A8Srgb utilizes SRGB (end of it - Srgb)
+
+        // We search through this device's available formats, and if we find a format that supports color format eB8G8R8A8Srgb and the SRGB color space, return in.
+        for ( const auto& availableFormat : availableFormats )
+        {
+            if ( availableFormat.format == vk::Format::eB8G8R8A8Srgb &&
+                availableFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear ) {
+                return availableFormat;
+            }
+        }
+
+        return availableFormats[0];
     }
 
 
