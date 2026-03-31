@@ -1,0 +1,54 @@
+
+builds the thing in build
+    cmake --build build
+        cmake --build <Folder>
+    Alternatively, use cmake -- build . (the  . means this folder), or cmake -- build .. in debug (.. means prev dir)
+    Use the command a bunch of times to test it out whenever you make changes.
+
+make a folder called build
+    mkdir build
+        mkdir <Folder>
+
+Build cmake here (so navigate to build)
+    cmake ..
+
+(Powershell cmd) Remove an item -> Everything within it -> Force it, no warning -> directory we want to delet
+    Remove-Item -Recurse -Force build
+
+cmake -S . -B build
+    You can replace the . with whatever file root, the root is where CMakeLists is present. This just configs the cmake build
+
+cmake -S . -B build -G "MinGW Makefiles"
+    Same thing but use mingw make
+
+cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+    configure CMake to use GCC -- you need to set DCMAKE_C_COMPILER too even tho we're using c++
+
+
+use gcc to compile
+g++ --std=c++20 -I"C:\tiny" -I"C:\mSys Stuff\ucrt64\include" -I"C:\VulkanSDK\1.4.341.1\Include" main.cpp -o main.exe -L"C:\VulkanSDK\1.4.341.1\Lib" -L"C:/mSys Stuff/ucrt64/lib" -lvulkan-1 -lgdi32 -lopengl32 -lglfw3
+
+MSYS2:
+
+pacman is the package manager.
+
+prefix commands with pacman
+
+pacman -syu updates all binaries installed.
+-s - Sync: searches for packages
+-y - Sees if its outdated
+-u - Upgrades installed packages to the latest version.
+
+
+pacman -s <PackageName>
+-S - Updates or installs packages
+
+gcc --version to see GCC's version (compiler version)
+
+
+
+
+
+powershell: cls or (Clear-Host) (use cls its quicker and easier) to clean the console so its nice and tidy
+
+
