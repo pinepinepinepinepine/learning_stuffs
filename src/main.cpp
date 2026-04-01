@@ -117,7 +117,6 @@ class HelloTriangleApplication
 
     // The swap chain is the series/chain (kinda like a queue, depends on presentation mode) of 'framebuffers', where GPUs draw to these individual framebuffers first for rendering, and then the swap chain appropriately sends (by choosing which framebuffer to display) images to the window surface.
     vk::raii::SwapchainKHR swapChain = nullptr;
-    std::vector<vk::Image> swapChainImages; // the image container in the swap chain
     // There are 3 kinds of sub-properties of the swap chain we need to check in order to see/set if swap chain's properties are compatible with our window surface.
     // VkSurfaceCapabilitiesKHR capabilities;          // Basic surface capabilities (min/max number of images in swap chain, min/max width and height of images, resolution) (contains swap extent)
     // std::vector<VkSurfaceFormatKHR> formats;        // Surface formats (pixel format, color space)
@@ -125,6 +124,9 @@ class HelloTriangleApplication
     vk::Extent2D swapChain_Extent_ImageResolution;
     vk::SurfaceFormatKHR swapChain_surfaceFormat;
     vk::PresentModeKHR swapChain_presentationMode;
+
+    std::vector<vk::Image> swapChainImages; // the image container in the swap chain
+    std::vector<vk::raii::ImageView> swapChainImageViews; // how we access the image
 
     void initWindow() {
 
@@ -154,7 +156,10 @@ class HelloTriangleApplication
 
         pickPhysicalDevice(); // this picks the graphics card in the system that supports the features we need.
         createLogicalDevice(); // this describes what features we want to actually use, and what queues to create
+
         createSwapChain(); // create swap chain to have images actually render within the window
+        createImageViews();
+
     }
 
 
@@ -405,6 +410,28 @@ class HelloTriangleApplication
         graphicsQueue = vk::raii::Queue( logicalDevice, queueIndex, 0 ); // P.S, we're passing the second param from earlier (not from the logical_device itself) because vulkan doesn't store it.
     }
 
+    void createImageViews()
+    {
+        // Make sure the image view container is empty as we're creating it here.
+        assert(swapChainImageViews.empty());
+
+        vk::ImageViewCreateInfo imageViewCreateInfo {
+            .viewType         = vk::ImageViewType::e2D,                         // Specifies we're rending to a 2D screen. (:e3D is 3d; :e1D is 1d)
+            .format           = swapChain_surfaceFormat.format,                 // The color format
+            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 } // Describe's the image's purpose and which part of the image should be accessed (we're specifying Color)
+        }; // There's also a .components field which mixes color channels around: imageViewCreateInfo.components = { vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity}; for an example (no clue)
+        // Hypothetically, if we had vk::SwapchainCreateInfoKHR::imageArrayLayers above 1, we should make multiple image views for each different layer to access them individually -- the maximum amount of image views is generally 16.
+
+        for (auto &swapChainImage : swapChainImages)
+        {
+            // ImageViews objects are referencing the original Image object (similarily to std::string_view): we're just saying this this imageView's Info is pointing to this swapChainImage.
+            // Then, we just push the imageView we just properly created (signalled by assigning .Image) into the swapChainImageViews member variable.
+            imageViewCreateInfo.image = swapChainImage;
+            swapChainImageViews.emplace_back( logicalDevice, imageViewCreateInfo );
+                // notice how for every vk::raii::ImageView in swapChainImageView, we're using the same imageViewCreateInfo -- every image view has the same properties
+        }
+    }
+
 
     void createSwapChain()
     {
@@ -436,7 +463,8 @@ class HelloTriangleApplication
         vk::SwapchainCreateInfoKHR swapChainCreateInfo
         {
             .surface          = *window_surface, // the window surface to present the swap chain's images onto
-            .minImageCount    = minImageCount,
+            .minImageCount    = minImageCount, // it's odd but in this swap chain that we're creating, the maximum number of framebuffers within this swap chain is the .minImageCount (name convention is inhereted from SurfaceCapabilitiesKHR) -- fixed after creation.
+                // After creation of the swap chain, in GPU Memory, the number of empty canvases is equal to .minImageCount's value, which will then be used as framebuffers.
             .imageFormat      = swapChain_surfaceFormat.format,
             .imageColorSpace  = swapChain_surfaceFormat.colorSpace,
             .imageExtent      = swapChain_Extent_ImageResolution,
@@ -455,7 +483,7 @@ class HelloTriangleApplication
         // we give the logical device because a swap chain object is created for that specific, logical (and thus physical) device -- we're using the capabilities of the physical device, and by proxy the logical device's
             // and obviously we're giving the create info as w/ every other creation object to actually give the swap chain value.
         swapChain = vk::raii::SwapchainKHR( logicalDevice, swapChainCreateInfo );
-        swapChainImages = swapChain.getImages();
+        swapChainImages = swapChain.getImages(); // returns a vector of images (which currently are empty canvases, formally framebuffers), where the number of images (or canvases, formally framebuffers) within is equal to chooseSwapChain_ImageCount()'s return;
     }
 
 
@@ -469,6 +497,7 @@ class HelloTriangleApplication
         if ( ( availableSurfaceCapabilities.maxImageCount > 0 ) && ( availableSurfaceCapabilities.maxImageCount < minImageCount ) )
             minImageCount = availableSurfaceCapabilities.maxImageCount;
 
+        // return the total image count
         return minImageCount;
     }
 
