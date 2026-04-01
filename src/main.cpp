@@ -108,11 +108,23 @@ class HelloTriangleApplication
     vk::raii::Device logicalDevice = nullptr; // the LOGICAL device: it's an interface to communicate with the GPU, this stores the requested QUEUES and GPU SPECIFIC EXTENSIONS+FEATURES
     vk::raii::Queue graphicsQueue = nullptr;   // the queue is automatically created when we created the logical device (vk::DeviceCreateInfo), this is just the handle to interface/use them. They don't need to be manually destroyed, it's implicit, no cleanup() mention needed.
 
-    // To enable extensions, you use this, but this isn't being elaborated on until later. Come back later again.
+
+    // To enable extensions, you use this
     std::vector<const char*> requiredDeviceExtension = {
         vk::KHRSwapchainExtensionName }; // Originally, its a VK_KHR_swapchain macro, but the vk:: is just a wrapper -- theyre equivalent. Use the VK_KHR_SWAPCHAIN_EXTENSION_NAME macro to have the compiler check for misspellings
-        /// the VK_KHR_swapchain extension is required for presenting rendered images from the device to the window.
+        /// the VK_KHR_swapchain extension (initialized below) is required for presenting rendered images from the device to the window.
             // See big_notes for some added information.
+
+    // The swap chain is the series/chain (kinda like a queue, depends on presentation mode) of 'framebuffers', where GPUs draw to these individual framebuffers first for rendering, and then the swap chain appropriately sends (by choosing which framebuffer to display) images to the window surface.
+    vk::raii::SwapchainKHR swapChain = nullptr;
+    std::vector<vk::Image> swapChainImages; // the image container in the swap chain
+    // There are 3 kinds of sub-properties of the swap chain we need to check in order to see/set if swap chain's properties are compatible with our window surface.
+    // VkSurfaceCapabilitiesKHR capabilities;          // Basic surface capabilities (min/max number of images in swap chain, min/max width and height of images, resolution) (contains swap extent)
+    // std::vector<VkSurfaceFormatKHR> formats;        // Surface formats (pixel format, color space)
+    // std::vector<VkPresentModeKHR> presentModes;     // Available presentation mode
+    vk::Extent2D swapChain_Extent_ImageResolution;
+    vk::SurfaceFormatKHR swapChain_surfaceFormat;
+    vk::PresentModeKHR swapChain_presentationMode;
 
     void initWindow() {
 
@@ -396,32 +408,73 @@ class HelloTriangleApplication
 
     void createSwapChain()
     {
-        // There are 3 kinds of properties we need to check in order to see if swap chain is compatible with our window surface.
-        // VkSurfaceCapabilitiesKHR capabilities;          // Basic surface capabilities (min/max number of images in swap chain, min/max width and height of images) (aka swap extent)
-        // std::vector<VkSurfaceFormatKHR> formats;        // Surface formats (pixel format, color space)
-        // std::vector<VkPresentModeKHR> presentModes;     // Available presentation modes
-
         // It is important that we only try to query for swap chain support after verifying that the extension is available.
         // If we don't have the required extension to begin with (VK_KHR_swapchain), it'll be undefined behaviour (potential crashes) as we're checking... garbage.
         // PhysicalDevice was already determined to have the support, so we can freely continue -- if we didn't have a supported GPU, our program would crash from throw std::runtime_error("failed to find a suitable GPU!"); in pickPhysicalDevice()
 
-        // The non-RAII way of getting ahold of these. third parameter is an output just to store a SurfaceCapabilitiesKHR object -- you'd do the same but vkGetPhysicalDeviceSurfaceFormats/PresentModesKHR() for the 2 others.
         // vkGetPhysicalDeviceSurfaceCapabilitiesKHR( physicalDevice, window_surface, &details.capabilities ); // IF using this w/ a VK::RAII object, like window_surface is VK::RAI, use *window_surface to convert window_surface to a non-vk-raii object.
+            // The non-RAII way of getting ahold of these. third parameter is an output just to store a SurfaceCapabilitiesKHR object -- you'd do the same but vkGetPhysicalDeviceSurfaceFormats/PresentModesKHR() for the 2 others.
 
-        // The idea is that we're getting the supported properties of the specific window surface on the specific physical device
-        vk::SurfaceCapabilitiesKHR windowSurface_Capabilities = physicalDevice.getSurfaceCapabilitiesKHR( window_surface );   // adding operator*window_surface is equivalent if window_surface is a non-pointer, vk::rai object.
-        std::vector<vk::SurfaceFormatKHR> availableFormats = physicalDevice.getSurfaceFormatsKHR( window_surface );         // this is because it makes the VK::RAII window_surface object back to its non VK::RAII object
-        std::vector<vk::PresentModeKHR> availablePresentModes = physicalDevice.getSurfacePresentModesKHR( window_surface ); // so, (object type vk::raii::SurfaceKHR) *window_surface is implicitly converted to (object type vkSurfaceKHR) window_surface
+        // The idea is that we're getting the supported properties of the specific window surface on the specific physical device -- we're choosing the settings for our swap chain image's
+        // adding operator*window_surface is equivalent if window_surface is a non-pointer, vk::rai object.
+        // this is because it makes the VK::RAII window_surface object back to its non VK::RAII object
+        // so, (object type vk::raii::SurfaceKHR) *window_surface is implicitly converted to (object type vkSurfaceKHR) window_surface
             // For this application alone (drawing a triangle), swap chain support is enough if, for the window surface, there's atleast one supported image format, and one supported presentation mode.
+                // In order to optimally choose the best settings for our swap chain to utilize, we have to consider, then choose the best from these 3 types of settings:
+                // 1. Surface format (color depth); 2. Presentation mode (conditions for "swapping" images to the screen); 3. Swap extent (resolution of images in swapchain).
 
-        // In order to optimally choose the best settings for our swap chain to utilize, we have to consider, then choose the best from these 3 types of settings:
-            // 1. Surface format (color depth); 2. Presentation mode (conditions for "swapping" images to the screen); 3. Swap extent (resolution of images in swapchain).
+        vk::SurfaceCapabilitiesKHR windowSurface_Capabilities = physicalDevice.getSurfaceCapabilitiesKHR( window_surface );
+        swapChain_Extent_ImageResolution = chooseSwapChain_SwapExtent( windowSurface_Capabilities ); // this gets the image resolution of the swap chain's framebuffers
+        uint32_t minImageCount = chooseSwapChain_ImageCount( windowSurface_Capabilities ); // the minimum image count our swap chain must have: Vulkan requires a swap chain must ALWAYS have the minimum or more number of images in it.
 
+        std::vector<vk::SurfaceFormatKHR> availableFormats = physicalDevice.getSurfaceFormatsKHR( window_surface );
+        swapChain_surfaceFormat  = chooseSwapChain_SurfaceFormat( availableFormats ); // choose the swap chain's format ( pixel color and color space )
 
+        std::vector<vk::PresentModeKHR> availablePresentModes = physicalDevice.getSurfacePresentModesKHR( window_surface );
+        swapChain_presentationMode = chooseSwapChain_PresentationMode( availablePresentModes ); // choose the swap chain's presentation mode ( order of images -- fifo, immediate, mailbox )
+
+        vk::SwapchainCreateInfoKHR swapChainCreateInfo
+        {
+            .surface          = *window_surface, // the window surface to present the swap chain's images onto
+            .minImageCount    = minImageCount,
+            .imageFormat      = swapChain_surfaceFormat.format,
+            .imageColorSpace  = swapChain_surfaceFormat.colorSpace,
+            .imageExtent      = swapChain_Extent_ImageResolution,
+            .imageArrayLayers = 1, // specifies how many layers (stacked 2D images) per one swap chain image (always 1 unless developing stereoscopic 3D app)
+            .imageUsage       = vk::ImageUsageFlagBits::eColorAttachment, // specifies how we want to use our image (color in a render directly to our swap chain for our example, but also as storage, sampled, texture, copying, transferring, etc); if we use the image outside of what we declared its usageImage, it's undefined behaviour.
+            .imageSharingMode = vk::SharingMode::eExclusive, // specifies if the image is to be used by multiple different queue families:
+                // eExclusive means one queue family per image (image ownership must also be explicitly transferred before using it in another queue family, but better performance);
+                // eConcurrent means multiple queue families CAN affect an image and thus don't have to explicitly transfer ownership (HOWEVER, you have to specify IN ADVANCE what queue families share ownership thru queueFamilyIndexCount + pQueueFamilyIndices, and you have to specify at minimum 2 families).
+            .preTransform     = windowSurface_Capabilities.currentTransform, // how the image should be transformed before it's sent to the swap chain (rotation/flipped/mirrored, etc -- currentTransform specifies no transforming)
+            .compositeAlpha   = vk::CompositeAlphaFlagBitsKHR::eOpaque, // the alpha channel of the image RELATIVE to the window surface (you can blend different windows with another, too) -- you can make the WINDOW'S BACKGROUND (like the user's desktop) visible. eOpaque prevents it, though.
+            .presentMode      = swapChain_presentationMode,
+            .clipped          = true // specifies if it should render non-visible pixels: if true, Vulkan won't render pixels that aren't visible (offscreen or obscured by something else); if false, Vulkan renders EVERY pixel even if it's not visible.
+            // One more mentioned member: .oldSwapchain (for now set is = nullptr), it's touched upon later but if the swap chain is invalid/unoptimized, we need to create a new one and additionally point to the (now unoptimized/invalid) old swap chain.
+        };
+
+        // we give the logical device because a swap chain object is created for that specific, logical (and thus physical) device -- we're using the capabilities of the physical device, and by proxy the logical device's
+            // and obviously we're giving the create info as w/ every other creation object to actually give the swap chain value.
+        swapChain = vk::raii::SwapchainKHR( logicalDevice, swapChainCreateInfo );
+        swapChainImages = swapChain.getImages();
     }
 
+
+    uint32_t chooseSwapChain_ImageCount( const vk::SurfaceCapabilitiesKHR& availableSurfaceCapabilities )
+    {
+        // vk::SurfaceCapabilitiesKHR::minImageCount is the minimum amount of images the swap chain must have (so as a direct result its the minimum amount of framebuffers, too)
+        // 3u is for triple buffering, which is just a convention, so we use it as a "default"; if our minimum image count requires it to be higher though, we use that instead.
+        auto minImageCount = std::max(3u, availableSurfaceCapabilities.minImageCount);
+
+        // Ensure the swap chain's minimum image count cannot go above the physical device's maximum image count -- 0 is a special value in this context which means no maximum, so we have to check if its actually max capped by checking over 0.
+        if ( ( availableSurfaceCapabilities.maxImageCount > 0 ) && ( availableSurfaceCapabilities.maxImageCount < minImageCount ) )
+            minImageCount = availableSurfaceCapabilities.maxImageCount;
+
+        return minImageCount;
+    }
+
+
     // Function to choose the swap chain's resolution of the images being displayed, out of this device's available capabilities -- typically equal to the resolution of the window we're drawing to in pixels
-    vk::Extent2D chooseSwapChain_SwapExtent( const vk::SurfaceCapabilitiesKHR& availableCapabilities )
+    vk::Extent2D chooseSwapChain_SwapExtent( const vk::SurfaceCapabilitiesKHR& availableSurfaceCapabilities )
     {
         // the struct, vk::SurfaceCapabilitiesKHR, tells us the range of possible resolutions
             // Vulkan usually recommends matching the resolution of the window, this is done by setting the width and height of its member variable .currentExtent
@@ -429,8 +482,8 @@ class HelloTriangleApplication
 
         // Whenever the Operating Systems determines the size of the window, Vulkan sets the currentExtent.width to be below the maximum value and appropriately sized for that window surface.
         // As a result, we use the currentExtent as our swap chain's image resolution because (essentially) the OS dictates it for us, and Vulkan'll 'fix' (essentially choose) it for us.
-        if ( availableCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max() )
-            return availableCapabilities.currentExtent;
+        if ( availableSurfaceCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max() )
+            return availableSurfaceCapabilities.currentExtent;
         // if it's false, we are free to choose ourselves between the minimum and maximum resolution that this physical devices will allow.
 
         // Used to hold the framebuffer's width and height
@@ -452,8 +505,8 @@ class HelloTriangleApplication
         // if the first parameter is greater than the maximum allowed, return the maximum allowed; if the first parameter is less than the minimum allowed, return the minimum allowed.
         // if the first parameter is within the range of minimum and maximum, return the first parameter.
         // the reason we're using clamp is so our dimensions of our swap chain images aren't the over the maximum, or under the minimum, dimensions of this physical device's capabilities.
-        dimensions.width = std::clamp<uint32_t>(width, availableCapabilities.minImageExtent.width, availableCapabilities.maxImageExtent.width);
-        dimensions.height = std::clamp<uint32_t>(height, availableCapabilities.minImageExtent.height, availableCapabilities.maxImageExtent.height);
+        dimensions.width = std::clamp<uint32_t>(width, availableSurfaceCapabilities.minImageExtent.width, availableSurfaceCapabilities.maxImageExtent.width);
+        dimensions.height = std::clamp<uint32_t>(height, availableSurfaceCapabilities.minImageExtent.height, availableSurfaceCapabilities.maxImageExtent.height);
 
         // Return the swap chain's clamp'd (between-ish) image resolution.
         return dimensions;
