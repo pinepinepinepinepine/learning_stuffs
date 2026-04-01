@@ -397,7 +397,7 @@ class HelloTriangleApplication
     void createSwapChain()
     {
         // There are 3 kinds of properties we need to check in order to see if swap chain is compatible with our window surface.
-        // VkSurfaceCapabilitiesKHR capabilities;          // Basic surface capabilities (min/max number of images in swap chain, min/max width and height of images)
+        // VkSurfaceCapabilitiesKHR capabilities;          // Basic surface capabilities (min/max number of images in swap chain, min/max width and height of images) (aka swap extent)
         // std::vector<VkSurfaceFormatKHR> formats;        // Surface formats (pixel format, color space)
         // std::vector<VkPresentModeKHR> presentModes;     // Available presentation modes
 
@@ -409,7 +409,7 @@ class HelloTriangleApplication
         // vkGetPhysicalDeviceSurfaceCapabilitiesKHR( physicalDevice, window_surface, &details.capabilities ); // IF using this w/ a VK::RAII object, like window_surface is VK::RAI, use *window_surface to convert window_surface to a non-vk-raii object.
 
         // The idea is that we're getting the supported properties of the specific window surface on the specific physical device
-        VkSurfaceCapabilitiesKHR windowSurface_Capabilities = physicalDevice.getSurfaceCapabilitiesKHR( window_surface );   // adding operator*window_surface is equivalent if window_surface is a non-pointer, vk::rai object.
+        vk::SurfaceCapabilitiesKHR windowSurface_Capabilities = physicalDevice.getSurfaceCapabilitiesKHR( window_surface );   // adding operator*window_surface is equivalent if window_surface is a non-pointer, vk::rai object.
         std::vector<vk::SurfaceFormatKHR> availableFormats = physicalDevice.getSurfaceFormatsKHR( window_surface );         // this is because it makes the VK::RAII window_surface object back to its non VK::RAII object
         std::vector<vk::PresentModeKHR> availablePresentModes = physicalDevice.getSurfacePresentModesKHR( window_surface ); // so, (object type vk::raii::SurfaceKHR) *window_surface is implicitly converted to (object type vkSurfaceKHR) window_surface
             // For this application alone (drawing a triangle), swap chain support is enough if, for the window surface, there's atleast one supported image format, and one supported presentation mode.
@@ -420,8 +420,67 @@ class HelloTriangleApplication
 
     }
 
-    // Function to choose the surface format out of this device's available formats
-    vk::SurfaceFormatKHR chooseSwapSurfaceFormat( const std::vector<vk::SurfaceFormatKHR>& availableFormats )
+    // Function to choose the swap chain's resolution of the images being displayed, out of this device's available capabilities -- typically equal to the resolution of the window we're drawing to in pixels
+    vk::Extent2D chooseSwapChain_SwapExtent( const vk::SurfaceCapabilitiesKHR& availableCapabilities )
+    {
+        // the struct, vk::SurfaceCapabilitiesKHR, tells us the range of possible resolutions
+            // Vulkan usually recommends matching the resolution of the window, this is done by setting the width and height of its member variable .currentExtent
+            // However, to indicate special treatment, set .currentExtent to the maximum value of uint32_t. If done, we're picking a resolution through usage of members .minImageExtent and .maxImageExtent
+
+        // Whenever the Operating Systems determines the size of the window, Vulkan sets the currentExtent.width to be below the maximum value and appropriately sized for that window surface.
+        // As a result, we use the currentExtent as our swap chain's image resolution because (essentially) the OS dictates it for us, and Vulkan'll 'fix' (essentially choose) it for us.
+        if ( availableCapabilities.currentExtent.width != std::numeric_limits<uint32_t>::max() )
+            return availableCapabilities.currentExtent;
+        // if it's false, we are free to choose ourselves between the minimum and maximum resolution that this physical devices will allow.
+
+        // Used to hold the framebuffer's width and height
+        int width;
+        int height;
+
+        // a Framebuffer is an area in memory where the GPU 'draws' the image before it's displayed: images first go through the framebuffer, and then to the window surface. (its like a background canvas)
+        // the Framebuffer is, most of the time, equal to the window surface.
+        // However, it's possible the framebuffer can be LARGER (rarely smaller) than the window surface because its in PHYSICAL pixels, while the window surface is in LOGICAL pixels
+        // Physical pixels can be larger than logical pixels because of a user's high DPI (dots per inch);
+        // as a result, the image is downscaled (or upscaled if the framebuffer is smaller, where upscaling gives poor image quality -- bad) to match the window surface.
+        glfwGetFramebufferSize(window, &width, &height); // glfwGetFramebufferSize() gets the framebuffer's resolution in PHYSICAL PIXELS.
+            // if the window has high DPI (due to user settings), the mismatch between window surface and framebuffer occurs.
+            // this function takes IN the window handle/pointer w/ the first parameter, and OUTPUTs its width and height through the second/third params.
+
+
+        vk::Extent2D dimensions;
+        // Clamp just ensures the output (first parameter) is within the ranges of second parameter (minimum allowed value) to third parameter (maximum allowed value).
+        // if the first parameter is greater than the maximum allowed, return the maximum allowed; if the first parameter is less than the minimum allowed, return the minimum allowed.
+        // if the first parameter is within the range of minimum and maximum, return the first parameter.
+        // the reason we're using clamp is so our dimensions of our swap chain images aren't the over the maximum, or under the minimum, dimensions of this physical device's capabilities.
+        dimensions.width = std::clamp<uint32_t>(width, availableCapabilities.minImageExtent.width, availableCapabilities.maxImageExtent.width);
+        dimensions.height = std::clamp<uint32_t>(height, availableCapabilities.minImageExtent.height, availableCapabilities.maxImageExtent.height);
+
+        // Return the swap chain's clamp'd (between-ish) image resolution.
+        return dimensions;
+    }
+
+
+
+    // Function to choose the swap chain's presentation mode out of this device's available present modes
+    vk::PresentModeKHR chooseSwapChain_PresentationMode( const std::vector<vk::PresentModeKHR>& availablePresentModes )
+    {
+        // The presentation mode is the actual conditions for showing images to the screen via the swap chain. There's a total of 4 options.
+            // vk::PresentModeKHR::eImmediate: Images submitted by your application are immediately sent
+            // vk::PresentModeKHR::eFifo: First in, first out - images are put in a queue (swap chain), presenting an image every refresh cycle (vSync) -- EVERY vulkan supported device has eFifo support
+            // vk::PresentModeKHR::eFifoRelaxed: eFifo, but if we miss a refresh, present an image immediately
+            // vk::PresentModeKHR::eMailbox: only one frame is kept in storage, new frames replace old ones (high energy usage, but generally best)
+
+            for ( const auto& availablePresentMode : availablePresentModes )
+            {
+                if ( availablePresentMode == vk::PresentModeKHR::eMailbox )
+                    return vk::PresentModeKHR::eMailbox; // could also return availablePresentMode, but whatever, literally doesn't matter
+            }
+        return vk::PresentModeKHR::eFifo; // EVERY Vulkan supported graphics card has eFifo available as a presentation mode, so it's our default if we don't find/choose anything else.
+    }
+
+
+    // Function to choose the swap chain's surface format out of this device's available formats
+    vk::SurfaceFormatKHR chooseSwapChain_SurfaceFormat( const std::vector<vk::SurfaceFormatKHR>& availableFormats )
     {
         assert(!availableFormats.empty());
 
