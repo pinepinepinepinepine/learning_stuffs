@@ -201,3 +201,40 @@ Due to image presentation being tied to the window system and its surface, swap 
             supports_SwapChain = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
             std::cout << deviceProperties.deviceName << " supports swap chain!\n";
         } (and then adding '&& supports_SwapChain' at the return)
+
+
+Buffers are blocks of memories on the GPU that store data for the GPU to read/write.
+https://docs.vulkan.org/tutorial/latest/03_Drawing_a_triangle/02_Graphics_pipeline_basics/00_Introduction.html for a neat visual
+The graphics pipeline is the sequence of operations that takes everything from the vertices and textures of meshes, to pixels in the render target. It follows..
+Vertex/Index buffer => Input Assembler -> Vertex Shader -> Tesselation Shader -> Geometry Shader -> Rasterization -> Fragment Shader -> Color Blending => Framebuffer
+
+The INPUT ASSEMBLER collects the raw vertex data from the buffer (sometimes collects index buffers to repeat certain elements without having to duplicate the vertex data)
+
+The VERTEX SHADER runs for every vertex (generally applies transformations) to turn vertex positions from model space to screen space -- it also passes individual vertex data down the pipeline.
+
+the TESSELATION SHADER subdivides geometry, which increases the quality to make things look less flat.
+
+the GEOMETRY SHADER is similar to the tesselation shader (but somehow more flexible): it runs on every primitive (primitive being vertices: a single point, a line, a triangle) and discards or put more primitives in to make it neater.
+
+the RASTERIZATION stage turns the primitives into fragments. Fragments are the pixel elements that will eventually be displayed on the framebuffer -- Fragments outside of the screen (canvas) are discarded.
+    Usually, if clipped=true, fragments behind other fragments are also discarded because of depth testing.
+
+the FRAGMENT SHADER is called upon EVERY fragment that wasn't discarded and determines which framebuffers the fragments are written to and with which colour and depth values.
+    It does this from the data from the vertex shader from earlier, where the data specifies texture coordinates and lighting.
+
+the COLOR BLENDING stage applies operations to mix different fragments together that map to the same pixel within the framebuffer -- fragments can overwrite each other, add up, or be mixed due to transparency.
+
+
+
+the Vertex Shader, Tesselation Shader, Geometry Shader, and Fragment Shader are programmable, which means we use our own code onto the graphics card to apply the exact operations we want.
+    These programs run on many GPU cores simulatenously to process many objects in parallel, like vertices and fragments.
+    For example, this allows us to use Fragment Shaders to implement anything from texturing and lighting, to ray tracers.
+
+whereas the Input Assembler, Rasterization, and Color Blending are fixed function stages: we can just tweak their operations using parameters, but they way they work is predefined.
+    With older APIs like OpenGL and direct3D, these were able to be programmable, but Vulkan makes it immutable, so you'd have to recreate the pipeline from scratch if you want to do custom stuff.
+
+Some of the programmable stages are optional based on what we're trying to do.
+    For example, tesselation and geometry shaders can be disabled if we're just drawing simple geometry.
+    Another example: if we're shadow mapping, we can ditch the fragment shader.
+
+
