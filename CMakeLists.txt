@@ -2,6 +2,11 @@
 # tell cmake what version we require
 cmake_minimum_required(VERSION 3.10)
 
+# sack of shit cmake: randomly (LITERALLY ALL OF A SUDDEN TODAY) i have to EXPLICITLY (ASIDE FROM LITERALLY TELLING THE DIR WHEN BUILDING) SPECIFY WHERE THIS FUCKING PATH IS
+# OTHERWISE IT PICKS UP THE "DEFAULT" (GARBAGE) COMPILER PATH
+set(CMAKE_CXX_COMPILER $ENV{CXX})
+set(CMAKE_C_COMPILER $ENV{CC})
+
 #name of the project we're using, not needed rn but yeah
 project( vulkanStuff )
 
@@ -18,18 +23,21 @@ set(GLFW $ENV{GLFW})
 set(TINY $ENV{TINY})
 set(SLANG $ENV{SLANG})
 
+# for some reason using \ for slang's env var returns.... C:slang/lib/slang.lib (???)
+string(REPLACE "\\" "/" SLANG ${SLANG})
+
 # Where we find header files.
 target_include_directories(main PRIVATE
 ${VULKAN_SDK}/Include
 ${TINY}
 ${GLFW}
-"C:/mSys Stuff/ucrt64/include" # lazy
 ${SLANG}/include
+"C:/mSys Stuff/ucrt64/include" # lazy
 )
 
 # Where we find libs (the actual code).
 target_link_libraries(main PRIVATE
 ${VULKAN_SDK}/Lib/vulkan-1.lib
-"C:/mSys Stuff/ucrt64/lib/libglfw3.a" # lazy
 ${SLANG}/lib/slang.lib
+"C:/mSys Stuff/ucrt64/lib/libglfw3.a" # lazy
 )
