@@ -16,6 +16,7 @@ add_executable(main src/main.cpp)
 set(VULKAN_SDK $ENV{VULKAN_SDK})
 set(GLFW $ENV{GLFW})
 set(TINY $ENV{TINY})
+set(SLANG $ENV{SLANG})
 
 # Where we find header files.
 target_include_directories(main PRIVATE
@@ -23,10 +24,12 @@ ${VULKAN_SDK}/Include
 ${TINY}
 ${GLFW}
 "C:/mSys Stuff/ucrt64/include" # lazy
+${SLANG}/include
 )
 
 # Where we find libs (the actual code).
 target_link_libraries(main PRIVATE
 ${VULKAN_SDK}/Lib/vulkan-1.lib
 "C:/mSys Stuff/ucrt64/lib/libglfw3.a" # lazy
+${SLANG}/lib/slang.lib
 )
