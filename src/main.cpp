@@ -24,6 +24,7 @@ import vulkan_hpp;
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <fstream>
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
@@ -661,9 +662,54 @@ class HelloTriangleApplication
     }
 
 
-    void createGraphicsPipeline() {
+    void createGraphicsPipeline()
+    {
+        auto shaderCode = readFile_SPIRVShaders("../shaders/slang.spv");
+
+        std::cout << "ShaderCode Size: " << shaderCode.size() << "\n";
 
     }
+
+
+    // [[nodiscard]] means the return object of this function (vk::raii::ShaderModule) has to be stored into another object vk::raii::ShaderModule),
+    // if we don't use (store) it, the compiler'll give a warning (not an error, will still compile) -- we do this because we could mess up our pipeline w/ unintended behaviour (just making a note so we know).
+    // This function takes in the byte-code inside of the buffer we made with readFile_SPIRVShaders(), and creates/returns a vk::raii::ShaderModule object from it.
+    [[nodiscard]] vk::raii::ShaderModule createShaderModule(const std::vector<char>& code) const
+    {
+
+    }
+
+
+    // Loads slang.spv (which is in bytecode format --not human readable-- containing shader data)
+    static std::vector<char> readFile_SPIRVShaders(const std::string& filename)
+    {
+        // Opens the specified file (filename) with 2 flags: read the file in binary mode (ISN'T HUMAN READABLE TEXT) (std::ios::binary) and (|) start reading at the end of the file (std::ios::ate)
+        std::ifstream file(filename, std::ios::ate | std::ios::binary);
+            // we start from the END of the file because we can use the READ POSITION (which is the end of the text from ::ate) to determine the file's size,
+            // and thus allocate a buffer (pre-allocated memory) through the vector right below.
+
+        if ( !file.is_open() ) { // just error checking.
+            throw std::runtime_error("failed to open file!");
+        }
+
+        // pre-allocates a vector of the file's byte size. (creating a buffer)
+        std::vector<char> buffer( file.tellg() ); // .tellg() returns the current position of the read cursor THROUGH bytes (essentially telling us the file size in bytes)
+            // initializing a vector with () is used to pre-allocate empty elements within that vector: vector(3) means it has 3 (pre-allocated) elements within.
+            // 1 byte == 1 element for a vector; therefore a 100 byte file pre-allocates 100 vector elements.
+
+        // then, we go to the beginning of the file: move the cursor 0 (first parameter) elements beyond the beginning (second parameter) (so right where the file begins)
+        file.seekg(0, std::ios::beg);
+
+        // instead of looping, .read() handles it so you can "read it all at once"
+        // all this does it set buffer[n] equal to a single byte of memory within that file
+        file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+            // after reading, buffer contains 1 byte in each of its elements (where each byte is 8 bits), which, in our context, contains the code in SPIR-V format
+
+        file.close(); // close the file then return it.
+        return buffer;
+    }
+
+
 
 
     void setupDebugMessenger()
