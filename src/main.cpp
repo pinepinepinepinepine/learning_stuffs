@@ -160,6 +160,8 @@ class HelloTriangleApplication
         createSwapChain(); // create swap chain to have images actually render within the window
         createImageViews();
 
+        createGraphicsPipeline(); // For an explanation of the graphics pipeline, see BIG_NOTES
+
     }
 
 
@@ -656,6 +658,11 @@ class HelloTriangleApplication
         }
 
         return requiredLayers;
+    }
+
+
+    void createGraphicsPipeline() {
+
     }
 
 
