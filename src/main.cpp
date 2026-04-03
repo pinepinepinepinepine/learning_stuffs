@@ -665,9 +665,31 @@ class HelloTriangleApplication
     void createGraphicsPipeline()
     {
         auto shaderCode = readFile_SPIRVShaders("../shaders/slang.spv");
-
         std::cout << "ShaderCode Size: " << shaderCode.size() << "\n";
 
+        // the shader module is just wrapping around the shader bytecode in another file.
+        // after we finished creating the graphics pipeline, it's no longer needed. hence, local to createGraphicsPipeline() instead of being a class member.
+        vk::raii::ShaderModule shaderModule = createShaderModule( shaderCode );
+
+        vk::PipelineShaderStageCreateInfo vertexShader_StageInfo {
+            .stage = vk::ShaderStageFlagBits::eVertex, // identifies this structure: what stage of the graphic pipeline this shader is for
+            .module = shaderModule,                    // the shader module's code to use
+            .pName = "vertMain"                        // the entry point to use (vertMain is our entry point here because this is a vertex shader)
+        };
+
+        // something kinda interesting is that shaderModule contains the code for the fragment shader as well (hence why it's being used for the following fragment shader's module creation).
+        // but by specifying what our entry point is by .pName, we guarantee we don't run fragment shader and vertex shader code together as we're calling its respective, independant function.
+            // this also means that we can make different functions to act as entry points in case we want to make something specific or whatever for one of these modules.
+        vk::PipelineShaderStageCreateInfo fragmentShader_StageInfo {
+            .stage = vk::ShaderStageFlagBits::eFragment,
+            .module = shaderModule,
+            .pName = "fragMain"
+        };
+
+        // To make the Tesselation and Geometry shaders, it's the exact same process. For this program, it's not needed, so we're skipping them.
+
+        // Just store it in a vector for now as we're gonna be referencing the general shader stages later.
+        std::vector<vk::PipelineShaderStageCreateInfo> shaderStages { vertexShader_StageInfo, fragmentShader_StageInfo };
     }
 
 
@@ -676,7 +698,22 @@ class HelloTriangleApplication
     // This function takes in the byte-code inside of the buffer we made with readFile_SPIRVShaders(), and creates/returns a vk::raii::ShaderModule object from it.
     [[nodiscard]] vk::raii::ShaderModule createShaderModule(const std::vector<char>& code) const
     {
+        // To the required info for a shader module's creation is the size of the code (in bytes)
+        vk::ShaderModuleCreateInfo ShaderModule_createInfo {
+            .codeSize = code.size() * sizeof(char), // Redundant? sizeof(char) is 1, and code.size is equal to bytes already? I suppose just for... clarity? whatever.
+            .pCode = reinterpret_cast<const uint32_t*>( code.data() ) // .pCode takes in uint32, so just cast it, no biggie
+                // data() returns a pointer to the first element, through this, .pCode infers the entirety of the code's vector by pointing to the next address through something formally called "Pointer Arithmetic".
+                // this address is achieved by adding sizeof(uint32_t)*[ElementNumber] and code.data() (the first element) together as the address of the next element will always follow that continuous pattern (pointer arithmetic).
+                // We HAVE to set .codeSize here because otherwise it won't know when to stop (when it's out of range).
+                    // the reason we ultimately have to cast to uint32_t is because Vulkan requires it (even though char is cheaper, it's 1 byte instead of u32's 4), so we comply;
+                    // otherwise, if we pass code.data() as char, the pointer arithmetic is off because it's adding by 4 when the vector's addresses are seperated by 1.
+        };
 
+        // as with all the other gpu related objects/structs, we pass logical device because we're creating it for this GPU
+        // and as with a bunch of other objects in Vulkan (common pattern), we first create a _createInfo (holding a bunch of relevant members) object to then pass to the real object.
+        vk::raii::ShaderModule shaderModule{ logicalDevice, ShaderModule_createInfo };
+
+        return shaderModule;
     }
 
 
