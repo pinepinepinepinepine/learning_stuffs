@@ -685,11 +685,45 @@ class HelloTriangleApplication
             .module = shaderModule,
             .pName = "fragMain"
         };
-
         // To make the Tesselation and Geometry shaders, it's the exact same process. For this program, it's not needed, so we're skipping them.
-
         // Just store it in a vector for now as we're gonna be referencing the general shader stages later.
         std::vector<vk::PipelineShaderStageCreateInfo> shaderStages { vertexShader_StageInfo, fragmentShader_StageInfo };
+
+
+            // Vertex Input
+        // this struct/state describes the format of the vertex data that'll be passed onto the Vertex Shader.
+        // This happens in two ways: Bindings and Attribute Descriptions.
+            // Bindings: specifies whether the data is per-vertex or per-instance (per group of vertices), and the spacing between data.
+            // Attribute Descriptions: the vertex's attributes (position, format/color, and what binding to load them from and which offset)
+        vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
+        // Due to us using hard-coded vertex data in the vertex shader (shader.slang), we'll specify later that there's no vertex data to load for now. Elaborate upon here https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/00_Vertex_input_description.html.
+            // the .pVertexBindingDescriptions and .pVertexAttributeDescriptions members point to an array of structs that describe details for loading vertex data.
+
+            // Input Assembly
+        // this struct describes what kind of geometry will be drawn from the vertices, and if primitive restart (how vertices are grouped into primitives/shapes) should be enabled (can ONLY be enabled for Strip topologies).
+            // to specify the geometry from vertices, use vk::PrimitiveTopology: these can be triangles (for every 3 vertices), lines (for every 2), or points -- we're making a triangle so eTriangleList
+        // Normally, vertices are loaded from the vertex buffer by index in sequential order. However with an 'element buffer', you can specify the specific indices to use.
+            // Enabling the .primitiveRestartEnable member to vk::True allows us to break up the lines and triangles with the vk::PrimitiveTopology::e<Line/Triangle>Strip using
+            // a special index of 0xFFFF or 0xFFFFFFFF (which allows us to create our own lines between vertices), which tells the GPU to make a new primitive strip.
+        vk::PipelineInputAssemblyStateCreateInfo inputAssembly {
+            .topology = vk::PrimitiveTopology::eTriangleList // specifies what topology we're using to make primitives (shapes: triangles/lines/points) by connecting vertices together
+        };
+
+        // States control how data flows/are processed throughout the pipeline stages.
+            // Such as Viewport (the modifiable section -- what to modify in this space), Rasterization mode (how the rasterization stage behaves), Depth, Color Blend, Line Width, and scissor state (what part of the canvas is to be 'cut' outside the specified space -- unmodified)
+        // While most of the pipeline state is baked into the pipeline (and thus cannot be changed), a small amount of states can be changed (are dynamic) without having to recreate the entire pipeline.
+            // Some examples are the size of the viewport (the window surface in our case), the line width, and blend constants.
+        // These are called Dynamic States.
+        std::vector<vk::DynamicState> dynamicStates { vk::DynamicState::eViewport, vk::DynamicState::eScissor }; // simply specify what states we want to be dynamic
+        // then fill in the dynamic state's create info as with any other _createinfo struct.
+        vk::PipelineDynamicStateCreateInfo dynamicState {
+            .dynamicStateCount = static_cast<uint32_t>( dynamicStates.size() ), // how many states we want to make dynamic,
+            .pDynamicStates = dynamicStates.data()                              // and the data themselves
+        }; // Identically to vk::ShaderModuleCreateInfo::pCode, the full contents of dynamicStates is accessed using pointer arithmetic, utilizing the first element of dynamicStates ( .data() )
+        // This will result in the specified states' default configuration to be entirely ignored (if not specified yourself, it's undefined behaviour), and you will have to specify what happens with the data at drawing time.
+            // This is common for viewport and scissor state as they should be flexible (otherwise it's a far more complex setup whenever baked in) because often they are changed per frame or per draw call.
+
+
     }
 
 
