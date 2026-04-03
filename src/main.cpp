@@ -302,11 +302,12 @@ class HelloTriangleApplication
 
         bool supports_required_extensions = checkDeviceExtensionSupport( physicalDevice );
 
-        // Check if our device can support whatever features
+        // Check if our device can support whatever features -- WE ARE NOT ENABLING THEM HERE, JUST QUERYING IF THEY'RE SUPPORTED -- WE ENABLE THEM IN createLogicalDevice()
         // We need to grab ahold of this physical device's vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>(), so we use a template function
-        auto features = physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
+        auto features = physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
         // Then we check if they actually exist for this physical device through features (these act as a sort of bool here -- if they're false, our device doesn't support it)
-        bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
+        bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
+                                        features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
                                         features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
         if ( supportsRequiredFeatures )
             std::cout << deviceProperties.deviceName << " supports our required features!\n";
@@ -377,14 +378,17 @@ class HelloTriangleApplication
         // It specifies the used device features.
         vk::PhysicalDeviceFeatures deviceFeatures;
 
+
+            // We ACTUALLY enable features/extensions here after querying them within isDeviceSuitable()
         // vk::PhysicalDeviceFeatures2 is the container for EVERYTHING including and beyond vulkan version 1.1 -- vk::PhysicalDeviceFeatures is 1.0
         // vk::PhysicalDeviceVulkan13Features SPECIFICALLY only contains vulkan v1.3 features.
         // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT contain Extension-specified features
         // in order to enable any feature, Vulkan uses a concept of "structure chaining", where each feature struct (the <> feature structs specified below)
         // has a pNext field that can point to another unrelated feature struct, which is a "chain of feature requests" -- the vulkan C++ API provides a helper template vk::StructureChain to make this easier.
         // First step: we create a vk::StructureChain with 3 different feature structs, and for each different struct, we provide an initializer, assign them below with {}, seperating w/ comma
-        vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
+        vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
             {},                               // vk::PhysicalDeviceFeatures2 (empty for now)
+            {.shaderDrawParameters = true},   // vk::PhysicalDeviceVulkan11Features - UNMENTIONED IN DOCS: needed for shader creation otherwise warning -- we're just enabling it (we query'd support in isDeviceSuitable)
             {.dynamicRendering = true },      // vk::PhysicalDeviceVulkan13Features - enable the 'dynamic rendering' feature from Vulkan 1.3
             {.extendedDynamicState = true }   // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT - enable the 'extended dynamic state' feature from the extension struct
         }; // vk::StructureChain automatically connects these structs together by setting up the pNext pointer between them, so now we have one object containing all 3 structs and their requested extensions (even if they're unrelated to one another)!
@@ -667,6 +671,8 @@ class HelloTriangleApplication
         auto shaderCode = readFile_SPIRVShaders("../shaders/slang.spv");
         std::cout << "ShaderCode Size: " << shaderCode.size() << "\n";
 
+        /* PROGRAMMABLE PIPELINE FUNCTIONS */
+
         // the shader module is just wrapping around the shader bytecode in another file.
         // after we finished creating the graphics pipeline, it's no longer needed. hence, local to createGraphicsPipeline() instead of being a class member.
         vk::raii::ShaderModule shaderModule = createShaderModule( shaderCode );
@@ -690,6 +696,8 @@ class HelloTriangleApplication
         std::vector<vk::PipelineShaderStageCreateInfo> shaderStages { vertexShader_StageInfo, fragmentShader_StageInfo };
 
 
+        /* FIXED PIPELINE FUNCTIONS */
+
             // Vertex Input
         // this struct/state describes the format of the vertex data that'll be passed onto the Vertex Shader.
         // This happens in two ways: Bindings and Attribute Descriptions.
@@ -708,6 +716,34 @@ class HelloTriangleApplication
         vk::PipelineInputAssemblyStateCreateInfo inputAssembly {
             .topology = vk::PrimitiveTopology::eTriangleList // specifies what topology we're using to make primitives (shapes: triangles/lines/points) by connecting vertices together
         };
+
+            // Viewport and Scissor
+        // For a VERY nice visual: https://docs.vulkan.org/tutorial/latest/_images/images/viewports_scissors.png
+        // A viewport is the region of the framebuffer where the exact image will be rendered to, where at this step, the image itself is geometrically unmodified, but it's positioning and scale is modified depending on the viewpoint's area.
+        // the scissor state will discard every pixel outside its rectangle
+        // It goes like this: viewport state -> rasterization -> scissor state
+        vk::Viewport viewport{
+            0.0f, 0.0f, // X and Y: the viewport's upper left corner (higher Y level = downwards -- a little weird but whatever)
+            static_cast<float>( swapChain_Extent_ImageResolution.width ),   // the viewport's width (so how right it goes relative to the X)
+            static_cast<float>( swapChain_Extent_ImageResolution.height ),  // the viewport's height (so how down it goes relative to the Y)
+            0.0f, 1.0f // min and max depth range (range of 0.0 -> 1.0, generally keep these 0.0f + 1.0f if youre not doing anything special).
+        };
+        // Same logic as the viewport's rectangle (X, Y + width, height): first parameter is the upper left corner of the scissor rectangle, second parameter is how right/down it goes. (we gave it the size of the entire framebuffer, so it's 1:1)
+        vk::Rect2D scissor{ vk::Offset2D{ 0, 0 }, swapChain_Extent_ImageResolution };
+            // this is relative to the FRAMEBUFFER (NOT THE VIEWPORT), so 0,0 is the 0,0 of the framebuffer, NOT to the viewport if say the viewport starts at x100,y100 of the framebuffer, scissor w/ x0,y0'll start at 0,0 on the framebuffer.
+        // We are currently at pipeline creation time within this function (createGraphicsPipeline()).
+        // With a dynamic state, we just need to declare their count of pipeline creation, but due to it being set as dynamic, the viewport and scissor rectangles themselves are setup at drawing time.
+            // (we feed .pScissors and .pViewports as with any other createInfo -- the data itself, all we're doing now is giving the number of, but nothing related to the actual rectangles)
+        // Without a dynamic state, we would have to declare the rectangles themselves at pipeline creation (right here), thus making them immutable (unless you create a new pipeline altogether)
+            // vk::PipelineViewportStateCreateInfo viewportState{.viewportCount = 1, .pViewports = &viewport, .scissorCount = 1, .pScissors = &scissor};
+        vk::PipelineViewportStateCreateInfo viewportState{.viewportCount = 1, .scissorCount = 1};
+        // The scissor and viewport states can either be static or dynamic, but generally people prefer them to be dynamic for flexibility -- we set them to be dynamic with the dynamicState vector at the bottom.
+
+            // Rasterizer
+
+
+        /*---*/
+
 
         // States control how data flows/are processed throughout the pipeline stages.
             // Such as Viewport (the modifiable section -- what to modify in this space), Rasterization mode (how the rasterization stage behaves), Depth, Color Blend, Line Width, and scissor state (what part of the canvas is to be 'cut' outside the specified space -- unmodified)
