@@ -113,6 +113,10 @@ class HelloTriangleApplication
             // See big_notes for some added information.
 
     vk::raii::PhysicalDevice physicalDevice = nullptr; // the PHYSICAL device -- the GPU, this stores the handle
+    // we CANNOT get the queueIndex directly from the graphicsQueue object (even though we're constructing the queue w/ it), we need to track it ourselves.
+        // this is needed for the command pool, hence why it's a member.
+        // used to get (and then store) the first index into queueFamilyProperties which supports both graphics and present
+    uint32_t queueIndex = ~0;
     vk::raii::Device logicalDevice = nullptr; // the LOGICAL device: it's an interface to communicate with the GPU, this stores the requested QUEUES and GPU SPECIFIC EXTENSIONS+FEATURES
     vk::raii::Queue graphicsQueue = nullptr;   // the queue is automatically created when we created the logical device (vk::DeviceCreateInfo), this is just the handle to interface/use them. They don't need to be manually destroyed, it's implicit, no cleanup() mention needed.
 
@@ -129,6 +133,14 @@ class HelloTriangleApplication
     // At this point, we're required to make a pipeline layout but won't be using it until a few chapter, so we're making it empty.
     vk::raii::PipelineLayout pipelineLayout = nullptr;
     vk::raii::Pipeline graphicsPipeline = nullptr; // the pipeline ITSELF!
+
+    // A command pool manages the memory that is used to store the command buffers, and the command buffers are allocated from the command pool.
+    vk::raii::CommandPool commandPool = nullptr;
+    // Command Buffers are objects that are used to record commands which can be submitted through the device's queue for the command buffer commands' execution.
+    // Command Buffers are automatically destroyed whenever the Command Pool is destroyed.
+    // https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html
+    vk::raii::CommandBuffer commandBuffer = nullptr;
+
 
     void initWindow() {
 
@@ -163,6 +175,9 @@ class HelloTriangleApplication
         createImageViews();
 
         createGraphicsPipeline(); // For an explanation of the graphics pipeline, see BIG_NOTES
+
+        createCommandPool();
+        createCommandBuffer();
 
     }
 
@@ -350,8 +365,6 @@ class HelloTriangleApplication
     {
         std::vector<vk::QueueFamilyProperties> queueFamilyProperties = physicalDevice.getQueueFamilyProperties(); // We're reusing this: we just need to see what our selected physical device can queue.
 
-        // get the first index into queueFamilyProperties which supports both graphics and present
-        uint32_t queueIndex = ~0;
         for ( uint32_t qfpIndex = 0; qfpIndex < queueFamilyProperties.size(); qfpIndex++ )
         {
         if ( (queueFamilyProperties[qfpIndex].queueFlags & vk::QueueFlagBits::eGraphics ) && // If the queue family supports eGraphics,
@@ -914,7 +927,86 @@ class HelloTriangleApplication
     }
 
 
+    void createCommandPool()
+    {
+        vk::CommandPoolCreateInfo commandPoolInfo{
+        .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer, // .flags can be set to contain two flags (bitmask | for and):
+            // vk::CommandPoolCreateFlagBits::eTransient: specify that command buffers are rerecorded/changed with new commands very often (which may change the memory allocation behaviour), and vk::CommandPoolCreateFlagBits::eResetCommandBuffer, which allows command buffers to be rerecorded/changed individually (without this flag, you'd have to reset their commands all together)
+            // We're going to be recording a command buffer every frame, so we want to reset and rerecord over it -- hence eResetCommandBuffer.
+        .queueFamilyIndex = queueIndex // Command buffers are actually executed by running them through a device's queue, like the graphics and presentation queues from earlier.
+            // Each command pool can only allocate command buffers where the command buffers are run through a single type of queue (pool's queue family must be the same as the buffer's queue family). We're recording commands for drawing, which is why we've chosen the graphics queue family.
+        };
 
+        // As with all the other objects, use CommandPool::constructor fed w/ the logical device and pool info itself to construct it.
+        commandPool = vk::raii::CommandPool(logicalDevice, commandPoolInfo);
+    }
+
+    void createCommandBuffer()
+    {
+        vk::CommandBufferAllocateInfo commandBuffer_allocationInfo {
+            .commandPool = commandPool, // the command pool from where buffers are allocated from (specifies which queues the command buffer can utilize, for our case, our buffers will run through eGraphics and eCompute)
+            .level = vk::CommandBufferLevel::ePrimary, // Specifies if the allocated command buffers are primary or secondary command buffers:
+                // ePrimary: Submits to a queue for execution, but cannot be called/referenced by other command buffers.
+                // eSecondary: Cannot be submitted to a queue directly, but can be called/referenced by primary command buffers. (kinda like a helper function to reuse common operations)
+            .commandBufferCount = 1 // Number of command buffers to allocate
+        };
+
+        // As with everything, We feed it the logicalDevice to specify we're utilizing this GPU, then pass the actual creation information.
+        // We use .front() because struct commandBuffers are a container that contains multiple struct commandBuffer: we just want our member commandBuffer to be this specific commandBuffer, hence .front()
+            // You could use also use [0], this is just neater
+        // We use std:move here because CommandBuffers.front() will return a temporary lvalue REFERENCE to the first element in vk::raii::CommandBuffers, where the container will be destroyed immediately after this line, hence temp reference.
+        // As a result, we use std::move to convert the lvalue object (which will be destroyed as it's a temporary reference) into an rvalue (data itself, not tied to a variable) that our commandBuffer'll take, so it no longer references the destroyed object and now owns the object itself.
+            // if .front() returned a pointer instead of a reference, then in theory we could just use operator* to dereference the pointer to set commandBuffer's value, but it's a reference, hence std::move.
+        commandBuffer = std::move( vk::raii::CommandBuffers( logicalDevice, commandBuffer_allocationInfo ).front() );
+    }
+
+    // recordCommandBuffer() will write (record) the commands that we want to contain inside a command buffer.
+        // We'll use the commandBuffer that we want to contain the command, and the index of the current swap chain image that we want to write/draw to.
+    void recordCommandBuffer( uint32_t swapChain_imageIndex )
+    {
+        // {} is vk::CommandBufferBeginInfo, it's empty as we don't have ANY members we'd want to use right now, but contains it contains .flags/.pInheritanceInfo, which we don't want to use.
+            // vk::CommandBufferBeginInfo::pInheritanceInfo is only relevant for secondary command buffers, which specifies what state to inherent from the calling primary command buffer.
+        // Here's possible vk::CommandBufferBeginInfo::flags
+            // vk::CommandBufferUsageFlagBits::eOneTimeSubmit: command buffer'll be re-recorded (changed) right after executing it once.
+            // vk::CommandBufferUsageFlagBits::eRenderPassContinue: a secondary command buffer that's only used within a single render pass
+            // vk::CommandBufferUsageFlagBits::eSimultaneousUse: the command buffer can be re-ran while it is already executing.
+        commandBuffer.begin({}); // tutorial mistakenly uses operator-> but ok... we'll use operator.
+            // vk::raii::CommandBuffer::begin() implicitly resets the already existing commands inside the command buffer, if we've already recorded a command once.
+    }
+
+    // This function is used to transition the image layout before and after rendering
+    // Different image layouts are optimized for different operations. For example, an image's layout can be optimal for presenting to the screen, or an optimal layout being used as a colour attachment (dictates presented colour)
+    // Before we start rendering an image, we need to transition its image layout to one that is suitable for rendering: vk::ImageLayout::eColorAttachmentOptimal.
+    void transition_image_layout( uint32_t imageIndex, vk::ImageLayout old_layout, vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask,
+	    vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask, vk::PipelineStageFlags2 dst_stage_mask )
+    {
+        vk::ImageMemoryBarrier2 barrier = {
+		    .srcStageMask        = src_stage_mask,
+		    .srcAccessMask       = src_access_mask,
+		    .dstStageMask        = dst_stage_mask,
+		    .dstAccessMask       = dst_access_mask,
+		    .oldLayout           = old_layout,
+		    .newLayout           = new_layout,
+		    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		    .image               = swapChainImages[imageIndex],
+		    .subresourceRange    = {
+		        .aspectMask     = vk::ImageAspectFlagBits::eColor,
+		        .baseMipLevel   = 0,
+		        .levelCount     = 1,
+		        .baseArrayLayer = 0,
+		        .layerCount     = 1
+            }
+        };
+
+        vk::DependencyInfo dependency_info = {
+		    .dependencyFlags         = {},
+		    .imageMemoryBarrierCount = 1,
+		    .pImageMemoryBarriers    = &barrier
+        };
+
+        commandBuffer.pipelineBarrier2( dependency_info );
+    }
 
     void setupDebugMessenger()
     {
@@ -967,3 +1059,6 @@ int main()
     std::cout << "\tSuccessfully Ended!\n";
 	return EXIT_SUCCESS;
 }
+
+
+// Probably a good idea to each sub-category into separate files because it's KINDA much. (device creation in one, pipeline in another, swap chain etc)

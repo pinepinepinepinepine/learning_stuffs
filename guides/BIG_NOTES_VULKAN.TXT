@@ -258,3 +258,13 @@ finalColor = finalColor & colorWriteMask;
 The most common way to colour blend is with alpha blending, where we want the new colour to be blended with the old colour based on the new colour's opacity.
     finalColor.rgb = newAlpha * newColor + (1 - newAlpha) * oldColor;
     finalColor.a = newAlpha.a;
+
+
+
+
+
+In previous versions of vulkan (pre 1.3), we'd need to create framebuffers to "bind" our image views to a render pass.
+However, w/ the introduction of Dynamic Rendering in Vulkan 1.3, we're now able to render directly to image views without creating framebuffers or render passes.
+As a result, dynamic rendering simplifies the process by eliminating the need for a render pass and framebuffer objects.
+ Instead, we specify color, depth, and stencil attachments directly when we begin rendering
+ We do this through structs vk::RenderingAttachmentInfo and vk::RenderingInfo to specify our attachments and rendering options.
