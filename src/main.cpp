@@ -854,7 +854,7 @@ class HelloTriangleApplication
         // In the tutorial, https://docs.vulkan.org/tutorial/latest/03_Drawing_a_triangle/02_Graphics_pipeline_basics/04_Conclusion.html, pipeline_info isn't written like this, but I think it's easier.
         vk::StructureChain<vk::GraphicsPipelineCreateInfo, vk::PipelineRenderingCreateInfo> pipeline_info { graphicsPipeline_CreateInfo, renderingPipeline_CreateInfo };
 
-        // Second Parameter is an optional vk::raii::PipelineCache object, which can store and reuse relevant pipeline creation data across multiple pipeline constructions -- elaborate within the 'pipeline cache chapter'
+        // Second Parameter is an optional vk::raii::PipelineCache object, which can store and reuse relevant pipeline creation data across multiple pipeline constructions -- elaborated later within the 'pipeline cache' chapter.
         // Third parameter, vk::StructureChain sets up pNext between the structs (ctrl f above), all we have to do is point to the first within its chain and Vulkan'll point to the following struct via pNext!
         graphicsPipeline = vk::raii::Pipeline( logicalDevice, nullptr, pipeline_info.get<vk::GraphicsPipelineCreateInfo>() );
     }
