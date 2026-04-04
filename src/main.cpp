@@ -105,10 +105,6 @@ class HelloTriangleApplication
         // The USAGE of this variable is platform flexible, but the literal creation of it inherently relies on the OS: for linux, it represents/contains VK_KHR_xlib_surface (X11 OS)/VK_KHR_xcb_surface (XCB OS); on windows, VK_KHR_win32_surface.
             // Furthermore, the "extensions this application has available print" shows VK_KHR_win32_surface because a) we're using Windows and b) it's automatically/specifically given from glfwRequiredExtensions (on linux, it'd show one of the two)
 
-    vk::raii::PhysicalDevice physicalDevice = nullptr; // the PHYSICAL device -- the GPU, this stores the handle
-    vk::raii::Device logicalDevice = nullptr; // the LOGICAL device: it's an interface to communicate with the GPU, this stores the requested QUEUES and GPU SPECIFIC EXTENSIONS+FEATURES
-    vk::raii::Queue graphicsQueue = nullptr;   // the queue is automatically created when we created the logical device (vk::DeviceCreateInfo), this is just the handle to interface/use them. They don't need to be manually destroyed, it's implicit, no cleanup() mention needed.
-
 
     // To enable extensions, you use this
     std::vector<const char*> requiredDeviceExtension = {
@@ -116,18 +112,22 @@ class HelloTriangleApplication
         /// the VK_KHR_swapchain extension (initialized below) is required for presenting rendered images from the device to the window.
             // See big_notes for some added information.
 
+    vk::raii::PhysicalDevice physicalDevice = nullptr; // the PHYSICAL device -- the GPU, this stores the handle
+    vk::raii::Device logicalDevice = nullptr; // the LOGICAL device: it's an interface to communicate with the GPU, this stores the requested QUEUES and GPU SPECIFIC EXTENSIONS+FEATURES
+    vk::raii::Queue graphicsQueue = nullptr;   // the queue is automatically created when we created the logical device (vk::DeviceCreateInfo), this is just the handle to interface/use them. They don't need to be manually destroyed, it's implicit, no cleanup() mention needed.
+
     // The swap chain is the series/chain (kinda like a queue, depends on presentation mode) of 'framebuffers', where GPUs draw to these individual framebuffers first for rendering, and then the swap chain appropriately sends (by choosing which framebuffer to display) images to the window surface.
     vk::raii::SwapchainKHR swapChain = nullptr;
     // There are 3 kinds of sub-properties of the swap chain we need to check in order to see/set if swap chain's properties are compatible with our window surface.
-    // VkSurfaceCapabilitiesKHR capabilities;          // Basic surface capabilities (min/max number of images in swap chain, min/max width and height of images, resolution) (contains swap extent)
-    // std::vector<VkSurfaceFormatKHR> formats;        // Surface formats (pixel format, color space)
-    // std::vector<VkPresentModeKHR> presentModes;     // Available presentation mode
-    vk::Extent2D swapChain_Extent_ImageResolution;
-    vk::SurfaceFormatKHR swapChain_surfaceFormat;
-    vk::PresentModeKHR swapChain_presentationMode;
-
+    vk::Extent2D swapChain_Extent_ImageResolution;  // The swap chain's extent (which is image resolution)
+        // VkSurfaceCapabilitiesKHR capabilities;          // 1. Basic surface capabilities (min/max number of images in swap chain, min/max width and height of images, resolution) (Capabilities struct contains the Extent -- struct above)
+    vk::SurfaceFormatKHR swapChain_surfaceFormat;   // 2. Surface formats (pixel format, color space)
+    vk::PresentModeKHR swapChain_presentationMode;  // 3. Available presentation mode
     std::vector<vk::Image> swapChainImages; // the image container in the swap chain
     std::vector<vk::raii::ImageView> swapChainImageViews; // how we access the image
+
+    // At this point, we're required to make a pipeline layout but won't be using it until a few chapter, so we're making it empty.
+    vk::raii::PipelineLayout pipelineLayout = nullptr;
 
     void initWindow() {
 
@@ -740,9 +740,71 @@ class HelloTriangleApplication
         // The scissor and viewport states can either be static or dynamic, but generally people prefer them to be dynamic for flexibility -- we set them to be dynamic with the dynamicState vector at the bottom.
 
             // Rasterizer
+        // Rasterizer takes the geometry formed by the vertices' connecting lines, and then turns it into fragments to later be coloured by the fragment shader.
+            // It also performs depth testing (whether or not a fragment is behind/infront an object, deciding visibility), face culling (removes front/back facing triangles), and the scissor test;
+                // if a fragment fails the depth test by being outside the far/near planes (viewport's minDepth + maxDepth), or if it's behind another fragment (in turn object), it'll be discarded (or clamped depending on if .depthClampEnable is true).
+            // also can be assigned to just fill the edges (wireframe), or fill entire polygons with fragments -- all this is specified with the _createInfo struct below.
+        vk::PipelineRasterizationStateCreateInfo rasterizer {
+            .depthClampEnable        = vk::False, // if true, if a fragment's depth isn't between the near and far planes, its depth is clamped (to vk::Viewport's minDepth + maxDepth) instead of discarded (requires enabling a GPU feature + is useful for shadow mapping).
+                // this doesn't color anything. this determines whether or not a fragment is present at all based upon the viewport's minDepth and maxDepth and if it's behind an object
+                // this is nice for shadow mapping because those fragments which would previously be discarded are present for shadows
+            .rasterizerDiscardEnable = vk::False, // if true, geometry doesn't pass through the rasterizer stage (skipping it entirely), which disables output to the framebuffer (so nothing is visible)
+            .polygonMode             = vk::PolygonMode::eFill, // determines how fragments are generated for geometry (eFill = entire area of polygon w/ fragments; eLine = edges are drawn as lines (wireframe); ePoint = vertices are drawn as points)
+                // Any other polygon mode aside from eFill requires enabling a GPU feature (make sure to first query for it first!)
+            .cullMode                = vk::CullModeFlagBits::eBack, // Determines what faces to cull: can cut out the front, back, both, or disable it entirely. (as a result, whatever facing triangles won't be shown)
+            .frontFace               = vk::FrontFace::eClockwise, // Specifies what vertex order is 'front facing': either clockwise or counter-clockwise (if a triangle is back-facing, it's likely behind something, and so not visible)
+            .depthBiasEnable         = vk::False, // The rasterizer can alter the depth values by either adding a constant, or biasing them based upon a fragment's slope in order to "skew" the depth test. This is sometimes used for shadowmapping.
+            .lineWidth               = 1.0f // the thickness of the lines (1.0f = a line 1.0 pixel thick): the maximum width is depends on hardware, and having this value be above 1.0f requires enabling the wideLines gpu feature.
+        };
+
+
+
+            // Multisampling
+        // this struct configures multisampling, which is one of the ways to perform anti-aliasing
+            // it works by combining multiple polygon's fragments that rasterize and populate a single pixel.
+            // furthermore, these are called "SAMPLES" of the same pixel: one pixel contains multiple samples (if .rasterizationSamples > 1) to choose a colour that reduces jagged edges -- so it blends together.
+                // as an example, a pixel is a jar, and samples are the colours inside that jar; individual samples get their color from the base fragment (the defaulted color) , or from depth (whether or not its covered)
+                // for a fragment to get its FINAL colour, the samples are averaged for that one individual fragment.
+        vk::PipelineMultisampleStateCreateInfo multisampling {
+            .rasterizationSamples = vk::SampleCountFlagBits::e1, // We are saying "we only want 1 sample per fragment", which means multi-sampling is disabled
+            .sampleShadingEnable = vk::False // determines whether the fragment shader runs for every fragment (=false) or every sample (=true) -- true has nicer colours and smoother edges, but it's greatly more expensive as it runs per SAMPLE (and every fragment can have multiple samples)
+        }; // we're revisiting this in another chapter.
+
+
+            // Depth and Stencil Testing (TO DO: ELABORATED UPON LATER, we're passing nullptr within the pipeline creation)
+        // this also discards fragments (two way filter process through this and rasterization)
+        // vk::PipelineDepthStencilStateCreateInfo;
+
+
+            // Colour Blending
+        // Whenever a fragment shader returns a colour on a certain fragment, it needs to be combined with the already existing colour in the framebuffer. This transformation is called Colour Blending, where there's two methods to achieve this:
+            // 1. Mix the old and new colour to make a final colour, or 2. Combine the old and new colour using a bitwise operation
+        // There's two structs to configure colour blending: 1. vk::PipelineColorBlendAttachmentState is for configurating colour blending per framebuffer,
+        // while 2. vk::PipelineColorBlendStateCreateInfo is for configuring colour blending globally. (which also means it'll affect per-framebuffer)
+        vk::PipelineColorBlendAttachmentState colorBlendAttachment { // see big_notes for an elaboration on how these members interact (line 240)
+            .blendEnable         = vk::True, // Whether or not this kind of blending is enabled: if enabled, it'll blend the fragment's colour with whatever's already in the framebuffer at that fragment's location; if disabled, the new fragment colour is unmodified (no blending w/ the previous).
+            .srcColorBlendFactor = vk::BlendFactor::eSrcAlpha, // Selects the blend factor for the source (new) colour
+            .dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha, // Selects the blend factor for the destination (old) colour
+            .colorBlendOp        = vk::BlendOp::eAdd,  // how to combine the two colours
+            .srcAlphaBlendFactor = vk::BlendFactor::eOne, // Selects the blend factor for the source (new) colour's alpha
+            .dstAlphaBlendFactor = vk::BlendFactor::eZero, // Selects the blend factor for the destination (old) colour's alpha
+            .alphaBlendOp        = vk::BlendOp::eAdd, // how to combine the two colours' alpha
+            .colorWriteMask      = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA // what colour channels are allowed to be written (if we exclude one of these, we won't see/use its respective colour at all)
+        };
+        // The create info of the colour blending:
+        vk::PipelineColorBlendStateCreateInfo colorBlending {
+            .logicOpEnable = vk::False, // For the second way to configure colour blending (BITWISE): Whether or not we're using bitwise combinations for our colours -- this WILL set .blendEnable to vk::False (choose only one)
+            .logicOp = vk::LogicOp::eCopy, // the bitwise operation to use to combine colours whenever we're using bitwise to combine colours (this only matters if logicOpEnable = vk::True)
+            .attachmentCount = 1, // The number of PipelineColorBlendAttachmentStates
+            .pAttachments = &colorBlendAttachment // the PipelineColorBlendAttachmentState themselves.
+        };
 
 
         /*---*/
+
+        // As mentioned, we're making an empty pipeline layout as we're required to, elaborated upon later.
+        vk::PipelineLayoutCreateInfo pipelineLayoutInfo{ .setLayoutCount = 0, .pushConstantRangeCount = 0 };
+        pipelineLayout = vk::raii::PipelineLayout(logicalDevice, pipelineLayoutInfo);
 
 
         // States control how data flows/are processed throughout the pipeline stages.

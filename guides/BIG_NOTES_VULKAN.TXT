@@ -238,3 +238,23 @@ Some of the programmable stages are optional based on what we're trying to do.
     Another example: if we're shadow mapping, we can ditch the fragment shader.
 
 
+
+The way colour blending works IN THE FIRST WAY (1. Mix the old and new colour to make a final colour) is shown fairly well with this pseudocode (if blendEnable is false, it's simply unmodified)
+
+
+if (vk::PipelineColorBlendAttachmentState::blendEnable) {
+    finalColor.rgb = (VkPipelineColorBlendAttachmentState::srcColorBlendFactor * newColor.rgb) <vk::PipelineColorBlendAttachmentState::colorBlendOp> (VkPipelineColorBlendAttachmentState::dstColorBlendFactor * oldColor.rgb);
+    finalColor.a = (VkPipelineColorBlendAttachmentState::srcAlphaBlendFactor * newColor.a) <vk::PipelineColorBlendAttachmentState::alphaBlendOp> (VkPipelineColorBlendAttachmentState::dstAlphaBlendFactor * oldColor.a);
+} else {
+    finalColor = newColor;
+}
+
+Then the resulting color from above is BITWISE AND'd with VkPipelineColorBlendAttachmentState::colorWriteMask to control which color channels are enabled or disabled.
+    The ENABLED color channels (R/G/B/Alpha) are updated in the framebuffer, while the disabled channels aren't written, and therefore keep their previous colour values.
+
+finalColor = finalColor & colorWriteMask;
+
+
+The most common way to colour blend is with alpha blending, where we want the new colour to be blended with the old colour based on the new colour's opacity.
+    finalColor.rgb = newAlpha * newColor + (1 - newAlpha) * oldColor;
+    finalColor.a = newAlpha.a;
