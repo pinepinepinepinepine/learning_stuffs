@@ -128,6 +128,7 @@ class HelloTriangleApplication
 
     // At this point, we're required to make a pipeline layout but won't be using it until a few chapter, so we're making it empty.
     vk::raii::PipelineLayout pipelineLayout = nullptr;
+    vk::raii::Pipeline graphicsPipeline = nullptr; // the pipeline ITSELF!
 
     void initWindow() {
 
@@ -692,11 +693,11 @@ class HelloTriangleApplication
             .pName = "fragMain"
         };
         // To make the Tesselation and Geometry shaders, it's the exact same process. For this program, it's not needed, so we're skipping them.
-        // Just store it in a vector for now as we're gonna be referencing the general shader stages later.
-        std::vector<vk::PipelineShaderStageCreateInfo> shaderStages { vertexShader_StageInfo, fragmentShader_StageInfo };
+            // Just store it in a vector for now as we're gonna be referencing the general shader stages later.
+        vk::PipelineShaderStageCreateInfo shaderStages[] { vertexShader_StageInfo, fragmentShader_StageInfo };
 
 
-        /* FIXED PIPELINE FUNCTIONS */
+        /* FIXED PIPELINE FUNCTIONS (STATES) */
 
             // Vertex Input
         // this struct/state describes the format of the vertex data that'll be passed onto the Vertex Shader.
@@ -802,14 +803,15 @@ class HelloTriangleApplication
 
         /*---*/
 
-        // As mentioned, we're making an empty pipeline layout as we're required to, elaborated upon later.
+        // As mentioned, we're making an empty pipeline layout as we're required to -- elaborated upon later.
+        // a pipeline layout contains uniform values (essentially global objects shared across) which can alter the behaviour of our shaders without having to recreate them,
+        // and push constants, which are a way of passing dynamic values to shaders, so allows uniform values to affect shaders.
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo{ .setLayoutCount = 0, .pushConstantRangeCount = 0 };
         pipelineLayout = vk::raii::PipelineLayout(logicalDevice, pipelineLayoutInfo);
 
-
-        // States control how data flows/are processed throughout the pipeline stages.
+        // States control how data flows/are processed throughout the pipeline stages -- these are the FIXED FUNCTION STAGES of the graphic pipeline.
             // Such as Viewport (the modifiable section -- what to modify in this space), Rasterization mode (how the rasterization stage behaves), Depth, Color Blend, Line Width, and scissor state (what part of the canvas is to be 'cut' outside the specified space -- unmodified)
-        // While most of the pipeline state is baked into the pipeline (and thus cannot be changed), a small amount of states can be changed (are dynamic) without having to recreate the entire pipeline.
+        // While most of the pipeline states are baked into the pipeline (and thus cannot be changed), a small amount of states can be changed (are dynamic) without having to recreate the entire pipeline.
             // Some examples are the size of the viewport (the window surface in our case), the line width, and blend constants.
         // These are called Dynamic States.
         std::vector<vk::DynamicState> dynamicStates { vk::DynamicState::eViewport, vk::DynamicState::eScissor }; // simply specify what states we want to be dynamic
@@ -822,6 +824,39 @@ class HelloTriangleApplication
             // This is common for viewport and scissor state as they should be flexible (otherwise it's a far more complex setup whenever baked in) because often they are changed per frame or per draw call.
 
 
+        vk::PipelineRenderingCreateInfo renderingPipeline_CreateInfo {
+            .colorAttachmentCount = 1,  // The number of color formats we're using
+            .pColorAttachmentFormats = &swapChain_surfaceFormat.format // the color formats
+        };
+
+        vk::GraphicsPipelineCreateInfo graphicsPipeline_CreateInfo {
+        .stageCount          = 2,   // The number of programmable stages we're using within this pipeline (we're using vertex and fragment shaders)
+        .pStages             = shaderStages, // the programmable stages themselves
+        .pVertexInputState   = &vertexInputInfo, // the following members are just the states (fixed functions stages) of the pipeline
+        .pInputAssemblyState = &inputAssembly,
+        .pViewportState      = &viewportState,
+        .pRasterizationState = &rasterizer,
+        .pMultisampleState   = &multisampling,
+        .pColorBlendState    = &colorBlending,
+        .pDynamicState       = &dynamicState,
+        .layout              = pipelineLayout, // currently empty, elaborated upon later (.layout receives a handle, not a struct pointer)
+        .renderPass          = nullptr // renderPass is nullptr here because we're using DYNAMIC rendering instead of a traditional render pass, which is what this field is.
+        }; // There's two more members: .basePipelineHandle and .basePipelineIndex, which are used to create a new graphics pipeline by deriving from an already existing pipeline (idea is it's less expensive and pipelines can have common traits)
+            // To use it, set vk::GraphicsPipelineCreateInfo::flags = vk::PipelineCreateFlagBits::eDerivative
+
+        // So far, we have:
+        // the Shader Stages: shader modules that are the programmable stages of the graphics pipeline. (such as vertex and fragment shader)
+        // the Fixed-Function States: structures that are the fixed-function stages of the graphics pipeline. (such as input assembly, rasterizer, viewport, and color blending)
+        // the Pipeline Layout (empty as of right now): containing uniform and push values that impact the shader at draw time.
+        // Dynamic Rendering: the color formats of the images which we'll use during rendering.
+
+
+        // In the tutorial, https://docs.vulkan.org/tutorial/latest/03_Drawing_a_triangle/02_Graphics_pipeline_basics/04_Conclusion.html, pipeline_info isn't written like this, but I think it's easier.
+        vk::StructureChain<vk::GraphicsPipelineCreateInfo, vk::PipelineRenderingCreateInfo> pipeline_info { graphicsPipeline_CreateInfo, renderingPipeline_CreateInfo };
+
+        // Second Parameter is an optional vk::raii::PipelineCache object, which can store and reuse relevant pipeline creation data across multiple pipeline constructions -- elaborate within the 'pipeline cache chapter'
+        // Third parameter, vk::StructureChain sets up pNext between the structs (ctrl f above), all we have to do is point to the first within its chain and Vulkan'll point to the following struct via pNext!
+        graphicsPipeline = vk::raii::Pipeline( logicalDevice, nullptr, pipeline_info.get<vk::GraphicsPipelineCreateInfo>() );
     }
 
 
