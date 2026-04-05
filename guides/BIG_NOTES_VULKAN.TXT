@@ -334,3 +334,14 @@ However, generally it's not ideal to block the host unless necessary as we want 
 We also must reset the fence back to the unsignaled state because fences control the execution of fences, and so the host gets to decide when to reset the fence -- semaphores, on the other hand, don't need to manually reset it as the host is not involved (goes to the GPU).
 
 In summary, semaphores are used to specify the execution order of operations on the GPU while fences are used to keep the CPU and GPU in sync with each-other.
+
+
+
+// Old code Relating to setting a SINGLE commandBuffer
+        // As with everything, We feed it the logicalDevice to specify we're utilizing this GPU, then pass the actual creation information.
+        // We use .front() because struct commandBuffers are a container that contains multiple struct commandBuffer: we just want our member commandBuffer to be this specific commandBuffer, hence .front()
+            // You could use also use [0], this is just neater
+        // We use std:move here because CommandBuffers.front() will return a temporary lvalue REFERENCE to the first element in vk::raii::CommandBuffers, where the container will be destroyed immediately after this line, hence temp reference.
+        // As a result, we use std::move to convert the lvalue object (which will be destroyed as it's a temporary reference) into an rvalue (data itself, not tied to a variable) that our commandBuffer'll take, so it no longer references the destroyed object and now owns the object itself.
+            // if .front() returned a pointer instead of a reference, then in theory we could just use operator* to dereference the pointer to set commandBuffer's value, but it's a reference, hence std::move.
+        // commandBuffer = std::move( vk::raii::CommandBuffers( logicalDevice, commandBuffer_allocationInfo ).front() );

@@ -29,6 +29,14 @@ import vulkan_hpp;
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
 
+// Frames in Flight refers to having multiple frames be rendered at once -- the rendering of one frame doesn't interfere with another.
+// This constant defines how many frames should be processed simulatenously
+constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+    // We chose 2 because we don't want the CPU to get too far ahead of the GPU -- it's a tradeoff, but generally this is ideal, it allows the CPU and GPU to be working on their own tasks at the same time.
+        // If the CPU finishes early, then it'll wait for the GPU to finish rendering before submitting more work.
+    // With 3 or more frames in flight, the CPU can get ahead of the GPU, adding frames of latency, which isn't ideal.
+
+
 
 // Validation layers flag if debug. We have to define ourselves what validation layers we will actually want to use.
 const std::vector<char const*> validationLayers = {
@@ -139,14 +147,16 @@ class HelloTriangleApplication
     // Command Buffers are objects that are used to record commands which can be submitted through the device's queue for the command buffer commands' execution.
     // Command Buffers are automatically destroyed whenever the Command Pool is destroyed.
     // https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html
-    vk::raii::CommandBuffer commandBuffer = nullptr;
+    std::vector<vk::raii::CommandBuffer> commandBuffers;
+        // commandBuffer(s) is now a vector due to us wanting to have multiple frames in flight: each frame needs its own command buffer.
 
     // see big_notes for an elaboration.
     // semaphore = forces GPU to wait; fence = forces CPU to wait.
-    vk::raii::Semaphore presentCompleteSemaphore = nullptr; // To signal an image has been grabbed from the swap chain, and is ready for rendering
-    vk::raii::Semaphore renderFinishedSemaphore = nullptr;  // To signal an image has finished rendering and that presentation can occur.
-    vk::raii::Fence drawFence = nullptr;                    // To ensure only one frame is rendered and presented at a time.
-
+    std::vector<vk::raii::Semaphore> presentCompleteSemaphore; // To signal an image has been grabbed from the swap chain, and is ready for rendering
+    std::vector<vk::raii::Semaphore> renderFinishedSemaphore;  // To signal an image has finished rendering and that presentation can occur.
+    std::vector<vk::raii::Fence> drawFence;                    // To ensure only one frame is rendered and presented at a time.
+        // Similarily with a vector of command buffers, every frame needs its own respective semaphore and fence to track it, hence we're making it a vector.
+    uint32_t wait_frameIndex = 0; // To assign semaphores their respective frames to track.
 
     void initWindow() {
 
@@ -183,7 +193,7 @@ class HelloTriangleApplication
         createGraphicsPipeline(); // For an explanation of the graphics pipeline, see BIG_NOTES
 
         createCommandPool(); // see functions for elaboration
-        createCommandBuffer();
+        createCommandBuffers();
 
         createSyncObjects(); // see big_notes for what sync objects are
 
@@ -208,19 +218,19 @@ class HelloTriangleApplication
             // The first parameter is an array of fences (we only have one so we just pass one fence object) that we want to wait upon
             // The second parameter specifies if we want to wait for either: one of the fences to be signaled, or for all the fences to be signaled BEFORE returning, resulting in a wait within this line.
             // Third parameter is a fail safe: if we  waited for the maximum integer number in nanoseconds with this wait, disable the timeout (because it means something went wrong) and continue
-        auto fenceResult = logicalDevice.waitForFences( *drawFence , vk::True, UINT64_MAX );
+        auto fenceResult = logicalDevice.waitForFences( *drawFence[wait_frameIndex] , vk::True, UINT64_MAX );
 
         if (fenceResult != vk::Result::eSuccess)
 			throw std::runtime_error("failed to wait for fence!"); // Self explanatory: if for some reason waitForFences() didn't wait (it is expected for it to wait on the line above -- alternatively, we reached 64bit limit), we throw an exception because something went wrong.
 
-        logicalDevice.resetFences( *drawFence ); // Signal the fence back to unsignaled so that the next iteration can run as expected (OTHERWISE, drawFence is set to signaled, causing waitForFences to never wait)
+        logicalDevice.resetFences( *drawFence[wait_frameIndex] ); // Signal the fence back to unsignaled so that the next iteration can run as expected (OTHERWISE, drawFence is set to signaled, causing waitForFences to never wait)
 
         // First param is the timeout: wait 64bit integer limit in nanoseconds before letting us pass
         // Second param is the semaphore: whenever we've acquired the next image (and finished executing acquireNextImage), signal the semaphore
         // Third param is the fence: we're not using a fence as a signal, so we use nullptr. Same logic as above.
         // the function itself returns two values: vk::Result, and the index of the vk::image within the swapChainImages array.
             // We then use that index to pick the vk::raii:FrameBuffer, and then use the command buffer on that framebuffer.
-        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphore, nullptr);
+        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphore[wait_frameIndex], nullptr);
 
         recordCommandBuffer( imageIndex );
         // Notice: we rerecord the command buffer each time, different each time depending on the image
@@ -230,26 +240,27 @@ class HelloTriangleApplication
         // VULKAN NOTE: for simplicity, wait for the queue to be idle before starting the frame
 		    // In the next chapter you see how to use multiple frames in flight and fences to sync
         // ME: removing this causes a validation layer error.
+            // and still does after the next chapter.
 
         vk::PipelineStageFlags waitDestinationStageMask( vk::PipelineStageFlagBits::eColorAttachmentOutput );
 
         // the vk::SubmitInfo configures the queue submission and its synchronization through its members.
         const vk::SubmitInfo submitInfo {
             .waitSemaphoreCount   = 1, // the number of semaphores we're waiting on before execution.
-            .pWaitSemaphores      = &*presentCompleteSemaphore, // the actual Semaphores to wait upon before execution.
+            .pWaitSemaphores      = &*presentCompleteSemaphore[wait_frameIndex], // the actual Semaphores to wait upon before execution.
             .pWaitDstStageMask    = &waitDestinationStageMask, // what stages of the pipeline where we need to wait for.
                 // We want to wait for writing colours to the image before we submit it, so we specify to to wait during the color attachment stage which is responsible for colour.
                 // This means that the vertex shader and such can execute upon other images while this image is not available yet for submission.
             .commandBufferCount   = 1, // the number of command buffers we want to execute.
-            .pCommandBuffers      = &*commandBuffer, // the command buffer itself.
+            .pCommandBuffers      = &*commandBuffers[wait_frameIndex], // the command buffer itself.
             .signalSemaphoreCount = 1, // the number of Semaphores to signal whenever the command buffer(s) specified above finish executing
-            .pSignalSemaphores    = &*renderFinishedSemaphore // the semaphores themselves to signal.
+            .pSignalSemaphores    = &*renderFinishedSemaphore[wait_frameIndex] // the semaphores themselves to signal.
         };
 
         // we can now submit the command buffer to the graphics queue (submitInfo contains the command buffer, which in turn contains the image we just recorded onto it, so thats how we ultimately display images!)
         // First parameter takes an array of vk::SubmitInfo structs (an array because it's more efficient for much larger workloads)
         // Second parameter is the fence that'll be signaled whenever the command buffer finishes execution. (Which will be waited upon for the next frame -- next call to drawFrame()!)
-        graphicsQueue.submit( submitInfo, *drawFence );
+        graphicsQueue.submit( submitInfo, *drawFence[wait_frameIndex] );
 
 
 
@@ -257,7 +268,7 @@ class HelloTriangleApplication
         // The presentation is configured through vk::PresentInfoKHR.
         const vk::PresentInfoKHR presentInfoKHR {
             .waitSemaphoreCount = 1, // the number of semaphores to wait upon before presenting an image
-            .pWaitSemaphores    = &*renderFinishedSemaphore, // the semaphores themselves to wait upon. (we want to wait for the command buffer to finish executing: we want to wait for the rendering/drawing of a photo to finish before presenting)
+            .pWaitSemaphores    = &*renderFinishedSemaphore[wait_frameIndex], // the semaphores themselves to wait upon. (we want to wait for the command buffer to finish executing: we want to wait for the rendering/drawing of a photo to finish before presenting)
             .swapchainCount     = 1, // the number of swap chains to present this image to
             .pSwapchains        = &*swapChain, // the swap chains themselves to present this image to
             .pImageIndices      = &imageIndex // the image's index assigned for each swap chain.
@@ -265,6 +276,10 @@ class HelloTriangleApplication
 
         // vk::raii::Queue::presentKHR submits the request to present an image to the swap chain.
         result = graphicsQueue.presentKHR( presentInfoKHR );
+
+        // We just need to increment the wait_frameIndex to cycle through the index to assign each semaphore a unique index so that it isn't tracking the same thing.
+        // Modulo is used cleverly here, remember it: the moment it reaches the cap (like w/ the BLP!), it resets back to zero. It's equivalent to just doing if (wait_frameIndex >= FramesFlight) wait_frameIndex=0;
+        wait_frameIndex = (wait_frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
 
@@ -1020,36 +1035,33 @@ class HelloTriangleApplication
         commandPool = vk::raii::CommandPool(logicalDevice, commandPoolInfo);
     }
 
-    void createCommandBuffer()
+    void createCommandBuffers()
     {
         vk::CommandBufferAllocateInfo commandBuffer_allocationInfo {
             .commandPool = commandPool, // the command pool from where buffers are allocated from (specifies which queues the command buffer can utilize, for our case, our buffers will run through eGraphics and eCompute)
             .level = vk::CommandBufferLevel::ePrimary, // Specifies if the allocated command buffers are primary or secondary command buffers:
                 // ePrimary: Submits to a queue for execution, but cannot be called/referenced by other command buffers.
                 // eSecondary: Cannot be submitted to a queue directly, but can be called/referenced by primary command buffers. (kinda like a helper function to reuse common operations)
-            .commandBufferCount = 1 // Number of command buffers to allocate
+            .commandBufferCount = MAX_FRAMES_IN_FLIGHT // Number of command buffers to allocate (Update: we want to create a command buffer count equal to our max frames in flight because each frame requires it's own command buffer)
         };
 
         // As with everything, We feed it the logicalDevice to specify we're utilizing this GPU, then pass the actual creation information.
-        // We use .front() because struct commandBuffers are a container that contains multiple struct commandBuffer: we just want our member commandBuffer to be this specific commandBuffer, hence .front()
-            // You could use also use [0], this is just neater
-        // We use std:move here because CommandBuffers.front() will return a temporary lvalue REFERENCE to the first element in vk::raii::CommandBuffers, where the container will be destroyed immediately after this line, hence temp reference.
-        // As a result, we use std::move to convert the lvalue object (which will be destroyed as it's a temporary reference) into an rvalue (data itself, not tied to a variable) that our commandBuffer'll take, so it no longer references the destroyed object and now owns the object itself.
-            // if .front() returned a pointer instead of a reference, then in theory we could just use operator* to dereference the pointer to set commandBuffer's value, but it's a reference, hence std::move.
-        commandBuffer = std::move( vk::raii::CommandBuffers( logicalDevice, commandBuffer_allocationInfo ).front() );
+        commandBuffers = vk::raii::CommandBuffers( logicalDevice, commandBuffer_allocationInfo );
     }
 
     // recordCommandBuffer() will write (record) the commands that we want to contain inside a command buffer.
         // We'll use the commandBuffer that we want to contain the command, and the index of the current swap chain image that we want to write/draw to.
     void recordCommandBuffer( uint32_t swapChain_imageIndex )
     {
+        // Since the addition of the vector to commandBuffer, auto &commandBuffer = commandBuffers[frameIndex]; to use commandBuffer directly instead of specifying commandBuffers[frameIndex] each time is handy, but whatever.
+
         // {} is vk::CommandBufferBeginInfo, it's empty as we don't have ANY members we'd want to use right now, but it contains members .flags/.pInheritanceInfo, which we don't want to use.
             // vk::CommandBufferBeginInfo::pInheritanceInfo is only relevant for secondary command buffers, which specifies what state to inherent from the calling primary command buffer.
         // Here's possible vk::CommandBufferBeginInfo::flags
             // vk::CommandBufferUsageFlagBits::eOneTimeSubmit: command buffer'll be re-recorded (changed) right after executing it once.
             // vk::CommandBufferUsageFlagBits::eRenderPassContinue: a secondary command buffer that's only used within a single render pass
             // vk::CommandBufferUsageFlagBits::eSimultaneousUse: the command buffer can be re-ran while it is already executing.
-        commandBuffer.begin({}); // tutorial mistakenly uses operator-> but ok... we'll use operator. This signals the start of the command buffer's commands.
+        commandBuffers[wait_frameIndex].begin({}); // tutorial mistakenly uses operator-> but ok... we'll use operator. This signals the start of the command buffer's commands.
             // vk::raii::CommandBuffer::begin() implicitly resets the already existing commands inside the command buffer, if we've already recorded a command once.
 
 
@@ -1084,14 +1096,14 @@ class HelloTriangleApplication
             .pColorAttachments    = &attachmentInfo     // the attachment data itself
         };
 
-        commandBuffer.beginRendering( renderingInfo ); // actually begin rendering here
+        commandBuffers[wait_frameIndex].beginRendering( renderingInfo ); // actually begin rendering here
 
         // bind the graphics pipeline (what pipeline we're using)
         // first parameter specifies if the pipeline object is a Graphics or Compute pipeline: we're drawing a triangle, so we're making a graphic.
-        commandBuffer.bindPipeline( vk::PipelineBindPoint::eGraphics, *graphicsPipeline );
+        commandBuffers[wait_frameIndex].bindPipeline( vk::PipelineBindPoint::eGraphics, *graphicsPipeline );
 
         // Since we specified the viewport and scissor states of the pipeline to be dynamic, we now have to set them within the command buffer before issuing the draw command.
-        commandBuffer.setViewport( 0, // We're using the first viewport (0 = first index) ( > 0 is for different screen stuff, confusing)
+        commandBuffers[wait_frameIndex].setViewport( 0, // We're using the first viewport (0 = first index) ( > 0 is for different screen stuff, confusing)
             vk::Viewport(
                 0.0f, 0.0f, // x and y (offset)
                 static_cast<float>( swapChain_Extent_ImageResolution.width ), static_cast<float>( swapChain_Extent_ImageResolution.height ), // width and height
@@ -1099,15 +1111,15 @@ class HelloTriangleApplication
             )
         );
 
-        commandBuffer.setScissor( 0, vk::Rect2D( vk::Offset2D( 0, 0 ), swapChain_Extent_ImageResolution ) ); // same thing as the above, just formatted a little differently, but it's a rectangle of size 0,0 -> width, height
+        commandBuffers[wait_frameIndex].setScissor( 0, vk::Rect2D( vk::Offset2D( 0, 0 ), swapChain_Extent_ImageResolution ) ); // same thing as the above, just formatted a little differently, but it's a rectangle of size 0,0 -> width, height
 
-        commandBuffer.draw(3, 1, 0, 0); // actually draw the thing.
+        commandBuffers[wait_frameIndex].draw(3, 1, 0, 0); // actually draw the thing.
             // First parameter: vertexCount - how many vertices we're drawing (we don't have a vertex buffer)
             // Second: instanceCount - Instanced rendering (use 1 if we're not doing that)
             // Third: firstVertex - Used as an offset into the vertex buffer, defines the lowest value of SV_VertexId -- if it's above 0, we're skipping some vertices to not be shaded.
             // Fourth: firstInstance - Used as an offset for instanced rendering, defines the lowest value of SV_InstanceID -- if it's above 0, we're skipping some instances to not be shaded (we have only one instance, so...)
 
-        commandBuffer.endRendering(); // end the rendering here.
+        commandBuffers[wait_frameIndex].endRendering(); // end the rendering here.
 
         // After rendering, transition the swapchain image to vk::ImageLayout::ePresentSrcKHR
         transition_image_layout(
@@ -1120,7 +1132,7 @@ class HelloTriangleApplication
             vk::PipelineStageFlagBits2::eBottomOfPipe               // the desination's stage: the bottom of the pipe means the graphic pipeline has FULLY finished (NO MORE PIPELINE WORK).
         );
 
-        commandBuffer.end(); // we've finished recording the command buffer: signal its end.
+        commandBuffers[wait_frameIndex].end(); // we've finished recording the command buffer: signal its end.
     }
 
     // This function is used to transition the image layout before and after rendering
@@ -1160,18 +1172,29 @@ class HelloTriangleApplication
 		    .pImageMemoryBarriers    = &barrier
         };
 
-        commandBuffer.pipelineBarrier2( dependency_info );
+        commandBuffers[wait_frameIndex].pipelineBarrier2( dependency_info );
     }
 
 
     void createSyncObjects()
     {
-
         // We're passing an empty vk::SemaphoreCreateInfo struct because we don't have any relevant fields to specify.
-            // Future versions (FUTURE.. JUST IN PLANNING) may add .flags (like w/ fences) and .pNext for vk::SemaphoreCreateInfo, similarily to other structures.
-        presentCompleteSemaphore = vk::raii::Semaphore( logicalDevice, vk::SemaphoreCreateInfo() );
-        renderFinishedSemaphore  = vk::raii::Semaphore( logicalDevice, vk::SemaphoreCreateInfo() );
-        drawFence                = vk::raii::Fence( logicalDevice, {.flags = vk::FenceCreateFlagBits::eSignaled} );
+            // Future versions (FUTURE.. JUST IN PLANNING) of Vulkan may add .flags (like w/ fences) and .pNext for vk::SemaphoreCreateInfo, similarily to other structures.
+
+        // For every frame in flight, we need a semaphore to track/signal the presentation of it.
+        for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+        {
+            presentCompleteSemaphore.emplace_back( logicalDevice, vk::SemaphoreCreateInfo() );
+            drawFence.emplace_back( logicalDevice, vk::FenceCreateInfo( { .flags = vk::FenceCreateFlagBits::eSignaled } ) );
+        }
+
+        // We make a semaphore for every image within the swap chain to signal whether that image has finished rendering.
+            // "Whenever renderFinished becomes signaled, send the rendered image to the GPU for presentation, and presentation waits on a separate presentComplete semaphore to actually display"
+            // All this renderFinishedSemaphore does is track if its respective image has finished rendering, hence why we make renderFinishedSemaphore the size of swapChainImages.size() and not MAX_FRAMES_IN_FLIGHT,
+            // because this semaphore is solely focusing on whether or not the images within the swap chain are rendered -- NOTHING relating to presenting per say.
+        for ( size_t i = 0; i < swapChainImages.size(); i++ ) {
+            renderFinishedSemaphore.emplace_back( vk::raii::Semaphore( logicalDevice, vk::SemaphoreCreateInfo() ) ); // the explicit type is redundant since we're emplacing, just showing.
+        }
     }
 
     void setupDebugMessenger()
