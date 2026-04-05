@@ -182,10 +182,10 @@ class HelloTriangleApplication
 
         createGraphicsPipeline(); // For an explanation of the graphics pipeline, see BIG_NOTES
 
-        createCommandPool();
+        createCommandPool(); // see functions for elaboration
         createCommandBuffer();
 
-        createSyncObjects();
+        createSyncObjects(); // see big_notes for what sync objects are
 
     }
 
