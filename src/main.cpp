@@ -964,22 +964,98 @@ class HelloTriangleApplication
         // We'll use the commandBuffer that we want to contain the command, and the index of the current swap chain image that we want to write/draw to.
     void recordCommandBuffer( uint32_t swapChain_imageIndex )
     {
-        // {} is vk::CommandBufferBeginInfo, it's empty as we don't have ANY members we'd want to use right now, but contains it contains .flags/.pInheritanceInfo, which we don't want to use.
+        // {} is vk::CommandBufferBeginInfo, it's empty as we don't have ANY members we'd want to use right now, but it contains members .flags/.pInheritanceInfo, which we don't want to use.
             // vk::CommandBufferBeginInfo::pInheritanceInfo is only relevant for secondary command buffers, which specifies what state to inherent from the calling primary command buffer.
         // Here's possible vk::CommandBufferBeginInfo::flags
             // vk::CommandBufferUsageFlagBits::eOneTimeSubmit: command buffer'll be re-recorded (changed) right after executing it once.
             // vk::CommandBufferUsageFlagBits::eRenderPassContinue: a secondary command buffer that's only used within a single render pass
             // vk::CommandBufferUsageFlagBits::eSimultaneousUse: the command buffer can be re-ran while it is already executing.
-        commandBuffer.begin({}); // tutorial mistakenly uses operator-> but ok... we'll use operator.
+        commandBuffer.begin({}); // tutorial mistakenly uses operator-> but ok... we'll use operator. This signals the start of the command buffer's commands.
             // vk::raii::CommandBuffer::begin() implicitly resets the already existing commands inside the command buffer, if we've already recorded a command once.
+
+
+        transition_image_layout (
+            swapChain_imageIndex, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal, // We are now transitioning the swapChain's image (swapChain_imageIndex) to go from eUndefined (no previous layout) -> eColorAttachmentOptimal (where eColorAttachmentOptimal is optimal for rendering)
+            {}, vk::AccessFlagBits2::eColorAttachmentWrite, // Bitmasks that define what access rights: our old image (SOURCE) format's access right is empty because it's eUndefined,
+            // but our new image (DESTINATION) format has vk::AccessFlagBits2::eColorAttachmentWrite, which grants permissions to specify pixel data into this image (again, specified by swapChain_imageIndex).
+            vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::PipelineStageFlagBits2::eColorAttachmentOutput
+            // the specified old (src - param one) image's stage must've finished before beginning the new desination's (param two) specified stage (vk::PipelineStageFlagBits2::eColorAttachmentOutput)
+                // the old stage is EMPTY because we've not made an image layout yet, so it's a little misleading -- it's considered finished so it's kinda redundant.
+        );
+
+
+        // Then we're setting up the image's color (color attachment)
+        vk::ClearValue clearColor = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f); // A clearColor is what the color attachment (the color of the image view, this is pixel-by-pixel) is cleared to (filled fully with) -- 1.0f means opaque black.
+        vk::RenderingAttachmentInfo attachmentInfo {
+            .imageView   = swapChainImageViews[ swapChain_imageIndex ], // what image view we're rendering to
+            .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,    // the image layout the image will be in during rendering.
+            .loadOp      = vk::AttachmentLoadOp::eClear,                // specifies what we'll do to our image BEFORE rendering (clearing it, which is filling it in fully)
+            .storeOp     = vk::AttachmentStoreOp::eStore,               // what we'll do to the image AFTER rendering (we're just storing it for later use)
+            .clearValue  = clearColor                                   // the color used for the eClear operation (the screen will first be rendered fully opaque black)
+        };
+
+
+        vk::RenderingInfo renderingInfo {
+            .renderArea = {                                 // this is what we actually render to inside of the specific image. (defines the size of the rendering rectangle/area)
+                .offset = { 0, 0 },                         // the first point of the rectangle (0,0 being upper top left)
+                .extent = swapChain_Extent_ImageResolution  // we're passing the image resolution here to specify the .extent (how far down and right it goes) -- we're covering the entirety of the swap chain's canvas
+            },
+            .layerCount           = 1,                  // the number of layers within this image view we're rendering to (we only have one layer)
+            .colorAttachmentCount = 1,                  // the attachment count
+            .pColorAttachments    = &attachmentInfo     // the attachment data itself
+        };
+
+        commandBuffer.beginRendering( renderingInfo ); // actually begin rendering here
+
+        // bind the graphics pipeline (what pipeline we're using)
+        // first parameter specifies if the pipeline object is a Graphics or Compute pipeline: we're drawing a triangle, so we're making a graphic.
+        commandBuffer.bindPipeline( vk::PipelineBindPoint::eGraphics, *graphicsPipeline );
+
+        // Since we specified the viewport and scissor states of the pipeline to be dynamic, we now have to set them within the command buffer before issuing the draw command.
+        commandBuffer.setViewport( 0, // We're using the first viewport (0 = first index) ( > 0 is for different screen stuff, confusing)
+            vk::Viewport(
+                0.0f, 0.0f, // x and y (offset)
+                static_cast<float>( swapChain_Extent_ImageResolution.width ), static_cast<float>( swapChain_Extent_ImageResolution.height ), // width and height
+                0.0f, 1.0f // min and max depth
+            )
+        );
+
+        commandBuffer.setScissor( 0, vk::Rect2D( vk::Offset2D( 0, 0 ), swapChain_Extent_ImageResolution ) ); // same thing as the above, just formatted a little differently, but it's a rectangle of size 0,0 -> width, height
+
+        commandBuffer.draw(3, 1, 0, 0); // actually draw the thing.
+            // First parameter: vertexCount - how many vertices we're drawing (we don't have a vertex buffer)
+            // Second: instanceCount - Instanced rendering (use 1 if we're not doing that)
+            // Third: firstVertex - Used as an offset into the vertex buffer, defines the lowest value of SV_VertexId -- if it's above 0, we're skipping some vertices to not be shaded.
+            // Fourth: firstInstance - Used as an offset for instanced rendering, defines the lowest value of SV_InstanceID -- if it's above 0, we're skipping some instances to not be shaded (we have only one instance, so...)
+
+        commandBuffer.endRendering(); // end the rendering here.
+
+        // After rendering, transition the swapchain image to vk::ImageLayout::ePresentSrcKHR
+        transition_image_layout(
+            swapChain_imageIndex,                                   // again, what image we're referring to.
+            vk::ImageLayout::eColorAttachmentOptimal,               // transition this image layout from eColorAttachmentOptimal...
+            vk::ImageLayout::ePresentSrcKHR,                        // to ePresentSrcKHR for presenting images to the screen.
+            vk::AccessFlagBits2::eColorAttachmentWrite,             // the previous access rights
+            {},                                                     // The destination (ePresentSrcKHR) doesn't need any access rights.
+            vk::PipelineStageFlagBits2::eColorAttachmentOutput,     // the source's stage (finish this stage before transitioning to eBottomOfPipe)
+            vk::PipelineStageFlagBits2::eBottomOfPipe               // the desination's stage: the bottom of the pipe means the graphic pipeline has FULLY finished (NO MORE PIPELINE WORK).
+        );
+
+        commandBuffer.end(); // we've finished recording the command buffer: signal its end.
     }
 
     // This function is used to transition the image layout before and after rendering
     // Different image layouts are optimized for different operations. For example, an image's layout can be optimal for presenting to the screen, or an optimal layout being used as a colour attachment (dictates presented colour)
     // Before we start rendering an image, we need to transition its image layout to one that is suitable for rendering: vk::ImageLayout::eColorAttachmentOptimal.
+        // The old tutorial skips this, and the new one doesn't elaborate upon this thing https://vulkan-tutorial.com/Drawing_a_triangle/Drawing/Command_buffers
+        // However it's pre 1.3 and makes a separate render pass, meaning it doesn't render DIRECTLY through the image view, instead it'll render through a seperate render pass.
+            // see big_notes.
+        // Not to mention it isn't included in this section's code at the bottom (though, in the next one, yes) -- just awful.
+    // this is ONLY necessary in this context for dynamic rendering.
     void transition_image_layout( uint32_t imageIndex, vk::ImageLayout old_layout, vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask,
 	    vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask, vk::PipelineStageFlags2 dst_stage_mask )
     {
+        // Specified a bit of the fields within the call to this in recordCommandBuffer()
         vk::ImageMemoryBarrier2 barrier = {
 		    .srcStageMask        = src_stage_mask,
 		    .srcAccessMask       = src_access_mask,
