@@ -268,3 +268,69 @@ However, w/ the introduction of Dynamic Rendering in Vulkan 1.3, we're now able 
 As a result, dynamic rendering simplifies the process by eliminating the need for a render pass and framebuffer objects.
  Instead, we specify color, depth, and stencil attachments directly when we begin rendering
  We do this through structs vk::RenderingAttachmentInfo and vk::RenderingInfo to specify our attachments and rendering options.
+
+
+Rendering a frame in Vulkan follows these steps:
+
+1. Wait for the previous frame to finish
+2. Acquire an image from the swap chain
+3. Record a command buffer which draws the scene onto that image
+4. Submit the recorded command buffer
+5. Present the swap chain image
+
+
+Operations w/ Vulkan are executed simulatenously, but they are asynchronous. So sometimes the functions will return before the operation has finished
+
+We need to explicitly declare the order of operations as they happen on the GPU, some operations include:
+Acquire an image from the swap chain; Execute commands that draw onto the acquired image; Present that image to the screen for presentation, returning it to the swap chain
+
+These events (operations) are set in motion with a single function call, but they are executed asynchronously.
+The function calls will return before the operations are actually finished (because the function is handing it off to the GPU for execution via a queue) and the order of execution is also undefined.
+    Which is bad because operations typically depend on the previous one finishing (see the barrier we made -- pipelineBarrier2)
+So we use fences and semaphores to dictate the ordering.
+
+
+A Semaphore is used to add order between queue operations on the GPU.
+    Queue operations refers to the work we submit to a queue, either from a command buffer or from functions (which is shown later) -- some examples of queues are the graphics queue and presentation queue.
+    Semaphores are used to order work onto queues -- the submissions of works can be directed to the same queue, or different queues.
+        In Vulkan, there are two kinds of semaphores: binary and timeline -- the tutorial only speaks about Binary semaphores, not timeline. (so from this point forward, mentioned semaphores refer exclusively to binary)
+    A binary semaphore is either unsignaled or signaled.
+        It begins as unsignaled.
+        We use binary semaphores to order queue operations by providing the semaphore within a queue submission as a 'Signal' and as a 'Wait' in another queue operation.
+            The way this works is whenever queue operation A finishes executing, we 'signal' the semaphore, and operation B will wait for the semaphore to be signaled before executing.
+                For example, Semaphore S, Operation A and B (executed like A -> B ), whenever operation A is finished, it signals the Semaphore to be 'Signaled', then Operation B will wait and only run whenever semaphore has been Signaled.
+
+Pseudocode demonstrating the example:
+    vk::raii::CommandBuffer A, B = ... // record command buffers
+    vk::raii::Semaphore S = ...        // create a semaphore
+
+    // enqueue A, signal S when done - starts executing immediately
+    queue.submit(work: A, signal: S, wait: None)
+
+    // enqueue B, wait on S to be signal'd to actually start B -- this line WILL execute, but the command buffer's commands will wait for the signal (im just saying it'll put this command in a queue to be executed*)
+    queue.submit(work: B, signal: None, wait: S)
+
+*Just repeating what I said, but formally from the tutorial
+    the calls to submit() return immediately, so the waiting ONLY occurs on the GPU (submit runs returns back to caller and the command's in the GPU's hands, waiting for signal -> continue as normally in the CPU code);
+     the CPU continues without blocking or waiting for anything. To make the CPU wait, we use a different synchronization method: Fences.
+
+
+A fence is similar to Semaphores, but on the CPU (as opposed to Semaphore working on the GPU) -- CPU is formally known as the host (because it's where you're writing code to, CPU code'll direct code onto the GPU).
+    Fences are either in a signaled or unsignaled state, too. Whenever we submit work to be executed, we can attach a fence to that work, and whenever the work finishes, the fence will be signaled;
+     in turn, we can make host/cpu code wait for the fence to be signaled, which guarantees that the work'll finish before the host continues.
+
+Pseudocode demonstrating fences:
+    vk::raii::CommandBuffer A = ... // record command buffer with the transfer
+    vk::raii::Fence F = ...         // create the fence
+
+    // enqueue A, start work immediately, signal F when done (the CPU continues right after as .submit() returns instantly, regardless of signal, stop occurs when we hit device.waitForFences(F))
+    queue.submit(work: A, fence: F)
+
+    device.waitForFences(F) // blocks execution until A has finished executing (the host stalls here till signal)
+
+    save_screenshot_to_disk() // can't run until the transfer has finished (for the sake of the example, we need to make sure the screenshot was taken and transferred before we save)
+
+However, generally it's not ideal to block the host unless necessary as we want to feed them more with useful work. Ideally, we just use semaphores (or other synchronization primitives/objects we've not seen yet) to synchronize our work.
+We also must reset the fence back to the unsignaled state because fences control the execution of fences, and so the host gets to decide when to reset the fence -- semaphores, on the other hand, don't need to manually reset it as the host is not involved (goes to the GPU).
+
+In summary, semaphores are used to specify the execution order of operations on the GPU while fences are used to keep the CPU and GPU in sync with each-other.

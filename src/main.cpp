@@ -141,6 +141,12 @@ class HelloTriangleApplication
     // https://docs.vulkan.org/spec/latest/chapters/cmdbuffers.html
     vk::raii::CommandBuffer commandBuffer = nullptr;
 
+    // see big_notes for an elaboration.
+    // semaphore = forces GPU to wait; fence = forces CPU to wait.
+    vk::raii::Semaphore presentCompleteSemaphore = nullptr; // To signal an image has been grabbed from the swap chain, and is ready for rendering
+    vk::raii::Semaphore renderFinishedSemaphore = nullptr;  // To signal an image has finished rendering and that presentation can occur.
+    vk::raii::Fence drawFence = nullptr;                    // To ensure only one frame is rendered and presented at a time.
+
 
     void initWindow() {
 
@@ -179,6 +185,8 @@ class HelloTriangleApplication
         createCommandPool();
         createCommandBuffer();
 
+        createSyncObjects();
+
     }
 
 
@@ -187,8 +195,74 @@ class HelloTriangleApplication
         // GLFW's Win32 Message Loop equivalent (we're using GLFW for windowing -- vulkan can't natively). If an error or the closing of the window occurs, end the message loop.
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
+            drawFrame();
         }
+
+        // Wait for the logicalDevice to finish operations before exiting the main loop.
+        logicalDevice.waitIdle();
     }
+
+    void drawFrame()
+    {
+        // Waits for the logicalDevice's fence state to be true before continuing past this line.
+            // The first parameter is an array of fences (we only have one so we just pass one fence object) that we want to wait upon
+            // The second parameter specifies if we want to wait for either: one of the fences to be signaled, or for all the fences to be signaled BEFORE returning, resulting in a wait within this line.
+            // Third parameter is a fail safe: if we  waited for the maximum integer number in nanoseconds with this wait, disable the timeout (because it means something went wrong) and continue
+        auto fenceResult = logicalDevice.waitForFences( *drawFence , vk::True, UINT64_MAX );
+
+        if (fenceResult != vk::Result::eSuccess)
+			throw std::runtime_error("failed to wait for fence!"); // Self explanatory: if for some reason waitForFences() didn't wait (it is expected for it to wait on the line above -- alternatively, we reached 64bit limit), we throw an exception because something went wrong.
+
+        logicalDevice.resetFences( *drawFence ); // Signal the fence back to unsignaled so that the next iteration can run as expected (OTHERWISE, drawFence is set to signaled, causing waitForFences to never wait)
+
+        // First param is the timeout: wait 64bit integer limit in nanoseconds before letting us pass
+        // Second param is the semaphore: whenever we've acquired the next image (and finished executing acquireNextImage), signal the semaphore
+        // Third param is the fence: we're not using a fence as a signal, so we use nullptr. Same logic as above.
+        // the function itself returns two values: vk::Result, and the index of the vk::image within the swapChainImages array.
+            // We then use that index to pick the vk::raii:FrameBuffer, and then use the command buffer on that framebuffer.
+        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphore, nullptr);
+
+        recordCommandBuffer( imageIndex );
+        // Notice: we rerecord the command buffer each time, different each time depending on the image
+            // Essentially, we record the commands we want to occur onto that image, hence why we re-record it each time -- it's image specific!
+
+
+        vk::PipelineStageFlags waitDestinationStageMask( vk::PipelineStageFlagBits::eColorAttachmentOutput );
+
+        // the vk::SubmitInfo configures the queue submission and its synchronization through its members.
+        const vk::SubmitInfo submitInfo {
+            .waitSemaphoreCount   = 1, // the number of semaphores we're waiting on before execution.
+            .pWaitSemaphores      = &*presentCompleteSemaphore, // the actual Semaphores to wait upon before execution.
+            .pWaitDstStageMask    = &waitDestinationStageMask, // what stages of the pipeline where we need to wait for.
+                // We want to wait for writing colours to the image before we submit it, so we specify to to wait during the color attachment stage which is responsible for colour.
+                // This means that the vertex shader and such can execute upon other images while this image is not available yet for submission.
+            .commandBufferCount   = 1, // the number of command buffers we want to execute.
+            .pCommandBuffers      = &*commandBuffer, // the command buffer itself.
+            .signalSemaphoreCount = 1, // the number of Semaphores to signal whenever the command buffer(s) specified above finish executing
+            .pSignalSemaphores    = &*renderFinishedSemaphore // the semaphores themselves to signal.
+        };
+
+        // we can now submit the command buffer to the graphics queue (submitInfo contains the command buffer, which in turn contains the image we just recorded onto it, so thats how we ultimately display images!)
+        // First parameter takes an array of vk::SubmitInfo structs (an array because it's more efficient for much larger workloads)
+        // Second parameter is the fence that'll be signaled whenever the command buffer finishes execution. (Which will be waited upon for the next frame -- next call to drawFrame()!)
+        graphicsQueue.submit( submitInfo, *drawFence );
+
+
+
+        // the FINAL step is to submit the image back to the swap chain to have it eventually show up on the screen!
+        // The presentation is configured through vk::PresentInfoKHR.
+        const vk::PresentInfoKHR presentInfoKHR {
+            .waitSemaphoreCount = 1, // the number of semaphores to wait upon before presenting an image
+            .pWaitSemaphores    = &*renderFinishedSemaphore, // the semaphores themselves to wait upon. (we want to wait for the command buffer to finish executing: we want to wait for the rendering/drawing of a photo to finish before presenting)
+            .swapchainCount     = 1, // the number of swap chains to present this image to
+            .pSwapchains        = &*swapChain, // the swap chains themselves to present this image to
+            .pImageIndices      = &imageIndex // the image's index assigned for each swap chain.
+        };
+
+        // vk::raii::Queue::presentKHR submits the request to present an image to the swap chain.
+        result = graphicsQueue.presentKHR( presentInfoKHR );
+    }
+
 
     void cleanup()
     {
@@ -324,6 +398,7 @@ class HelloTriangleApplication
         // Then we check if they actually exist for this physical device through features (these act as a sort of bool here -- if they're false, our device doesn't support it)
         bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
                                         features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
+                                        features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
                                         features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
         if ( supportsRequiredFeatures )
             std::cout << deviceProperties.deviceName << " supports our required features!\n";
@@ -403,7 +478,7 @@ class HelloTriangleApplication
         vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
             {},                               // vk::PhysicalDeviceFeatures2 (empty for now)
             {.shaderDrawParameters = true},   // vk::PhysicalDeviceVulkan11Features - UNMENTIONED IN DOCS: needed for shader creation otherwise warning -- we're just enabling it (we query'd support in isDeviceSuitable)
-            {.dynamicRendering = true },      // vk::PhysicalDeviceVulkan13Features - enable the 'dynamic rendering' feature from Vulkan 1.3
+            { .synchronization2 = true, .dynamicRendering = true},      // vk::PhysicalDeviceVulkan13Features - enable the 'dynamic rendering' feature from Vulkan 1.3
             {.extendedDynamicState = true }   // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT - enable the 'extended dynamic state' feature from the extension struct
         }; // vk::StructureChain automatically connects these structs together by setting up the pNext pointer between them, so now we have one object containing all 3 structs and their requested extensions (even if they're unrelated to one another)!
         // As a result of them being chained together, when actually creating the logical device later, we just pass a pointer to the first structure in this chain, which will then trickle down to allow Vulkan seeing the other 2.
@@ -1082,6 +1157,17 @@ class HelloTriangleApplication
         };
 
         commandBuffer.pipelineBarrier2( dependency_info );
+    }
+
+
+    void createSyncObjects()
+    {
+
+        // We're passing an empty vk::SemaphoreCreateInfo struct because we don't have any relevant fields to specify.
+            // Future versions (FUTURE.. JUST IN PLANNING) may add .flags (like w/ fences) and .pNext for vk::SemaphoreCreateInfo, similarily to other structures.
+        presentCompleteSemaphore = vk::raii::Semaphore( logicalDevice, vk::SemaphoreCreateInfo() );
+        renderFinishedSemaphore  = vk::raii::Semaphore( logicalDevice, vk::SemaphoreCreateInfo() );
+        drawFence                = vk::raii::Fence( logicalDevice, {.flags = vk::FenceCreateFlagBits::eSignaled} );
     }
 
     void setupDebugMessenger()
