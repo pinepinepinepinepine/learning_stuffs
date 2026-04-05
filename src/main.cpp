@@ -226,6 +226,10 @@ class HelloTriangleApplication
         // Notice: we rerecord the command buffer each time, different each time depending on the image
             // Essentially, we record the commands we want to occur onto that image, hence why we re-record it each time -- it's image specific!
 
+        graphicsQueue.waitIdle();
+        // VULKAN NOTE: for simplicity, wait for the queue to be idle before starting the frame
+		    // In the next chapter you see how to use multiple frames in flight and fences to sync
+        // ME: removing this causes a validation layer error.
 
         vk::PipelineStageFlags waitDestinationStageMask( vk::PipelineStageFlagBits::eColorAttachmentOutput );
 
