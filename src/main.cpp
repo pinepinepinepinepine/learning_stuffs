@@ -25,9 +25,14 @@ import vulkan_hpp;
 #include <memory>
 #include <stdexcept>
 #include <fstream>
+#include <chrono>
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
+
+std::ofstream outputFile("../garbage_dump.txt");
+auto start_time = std::chrono::steady_clock::now();
+
 
 // Frames in Flight refers to having multiple frames be rendered at once -- the rendering of one frame doesn't interfere with another.
 // This constant defines how many frames should be processed simulatenously
@@ -81,6 +86,12 @@ void some_handy_printer( vk::raii::Context* context, std::vector<const char*>* r
 }
 
 
+double get_current_time()
+{
+    return std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - start_time ).count();
+}
+
+
 
 class HelloTriangleApplication
 {
@@ -88,9 +99,13 @@ class HelloTriangleApplication
 	void run()
 	{
 		initWindow();
+        outputFile << get_current_time() << " | Finished setting up the GLFW window" << std::endl; // endL flushes it out while making a new line over \n.
 		initVulkan();
+        outputFile << get_current_time() << " | Finished setting up Vulkan" << std::endl;
 		mainLoop();
+        outputFile << get_current_time() << " | Exited the Main Loop" << std::endl;
 		cleanup();
+        outputFile << get_current_time() << " | Cleaned up the objects before exiting" << std::endl;
 	}
 
   private:
@@ -167,7 +182,7 @@ class HelloTriangleApplication
         // GLFW: Vulkan doesn't support making windows itself, so we use GLFW.
         // it's intended to be used with OpenGL, so we use GLFW_NO_API to tell it not to create a OpenGL context later (as we are using another API -- vulkan)
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
         // glfwWindowHint's first parameter is the setting we're overriding (so, the CLIENT_API, or GLFW_RESIZEABLE), and the second is the actual value we're setting it (NO GLFW API and NO WINDOW RESIZE).
 
         // This creates the window, and by default, will show it -- you don't have to do ShowWindow like in win32.
@@ -232,6 +247,23 @@ class HelloTriangleApplication
             // We then use that index to pick the vk::raii:FrameBuffer, and then use the command buffer on that framebuffer.
         auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphore[wait_frameIndex], nullptr);
 
+        // Note: We could also recreate the swap chain if an image acquired is eSuboptimalKHR, but we're just... not. whatever.
+        if ( result == vk::Result::eErrorOutOfDateKHR ) // If we return this, this means the swap chain is incompatible with the new surface and can no longer be used for rendering.
+            // if including #define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS, instead of throwing an exception (crashing the program if it isn't catched), eErrorOutOfDateKHR will be treated as a success code and actually execute as if it's a success
+            // Right now, since we never defined it, it'll never get to this point because it'll just crash the program.
+        {
+            std::cout << "HOW'D YOU GET HERE?\n";
+            recreateSwapChain(); // And yeah, won't ever get here, but if it does, we need to recreate the swap chain (duh) because the swap chain no longer works.
+            return;
+        }
+
+        if ( result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR ) // If the acquisition of an image failed, just stop the program, nothing special.
+        {
+            assert(result == vk::Result::eTimeout || result == vk::Result::eNotReady);
+            throw std::runtime_error("failed to acquire swap chain image!");
+        }
+
+
         recordCommandBuffer( imageIndex );
         // Notice: we rerecord the command buffer each time, different each time depending on the image
             // Essentially, we record the commands we want to occur onto that image, hence why we re-record it each time -- it's image specific!
@@ -276,6 +308,21 @@ class HelloTriangleApplication
 
         // vk::raii::Queue::presentKHR submits the request to present an image to the swap chain.
         result = graphicsQueue.presentKHR( presentInfoKHR );
+        outputFile << get_current_time() << " | Presenting a new image" << std::endl;
+
+        if ( (result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR) ) // Suboptimal still works to present images to the screen, but just isn't 100% perfect; w/ eErrorOutOfDate, same gimmick as above
+        {
+            if (result == vk::Result::eErrorOutOfDateKHR) // we didn't define the macro above, so it should never get here (it'll crash.)
+                std::cout << "WHAT???\n";
+
+            outputFile << get_current_time() << " | Recreating the swap chain due to resizing" << std::endl;
+            recreateSwapChain();
+        }
+        else
+        {
+            // There are no other success codes than eSuccess; on any error code, presentKHR already threw an exception.
+            assert(result == vk::Result::eSuccess);
+        }
 
         // We just need to increment the wait_frameIndex to cycle through the index to assign each semaphore a unique index so that it isn't tracking the same thing.
         // Modulo is used cleverly here, remember it: the moment it reaches the cap (like w/ the BLP!), it resets back to zero. It's equivalent to just doing if (wait_frameIndex >= FramesFlight) wait_frameIndex=0;
@@ -285,6 +332,8 @@ class HelloTriangleApplication
 
     void cleanup()
     {
+        cleanupSwapChain(); // just destroys the swap chain + swap chain image views
+
         // vkDestroyInstance(instance, nullptr); // Destroy instance object. Only needed for vkInstance (not vk::rai)
         // Second parameter is shared by all explicit destruction functions: pAllocator
         // It represents the way we're destroying it. 'nullptr' is default -- Vulkan handles it. It specifies a callback we can use for a custom memory allocator.
@@ -547,6 +596,28 @@ class HelloTriangleApplication
         }
     }
 
+    // A function that ensures the swap chain and its image views are destroyed before re-creating them.
+    void cleanupSwapChain()
+    {
+        swapChainImageViews.clear();
+        swapChain = nullptr;
+    }
+
+
+    // If the size of the window changes, our swap chain becomes incompatible because the swap chain is specifically tailored to a surface size.
+        // otherwise, it'll produce wrong results as it's using the old surface size.
+    void recreateSwapChain()
+    {
+        logicalDevice.waitIdle(); // blocks the CPU (won't go beneath this line): waits for the GPU to not be executing anything (be idle) before recreating the entire swap chain.
+
+        // Clean up the swap chain and its image views before re-creating them below.
+        cleanupSwapChain();
+
+        createSwapChain();
+        // As a result of changing the swap chain, we also need to change our image views as the image views are supposed to be referencing the current swap chain's images, not the old one.
+        createImageViews();
+    }
+
 
     void createSwapChain()
     {
@@ -593,6 +664,7 @@ class HelloTriangleApplication
             .presentMode      = swapChain_presentationMode,
             .clipped          = true // specifies if it should render non-visible pixels: if true, Vulkan won't render pixels that aren't visible (offscreen or obscured by something else); if false, Vulkan renders EVERY pixel even if it's not visible.
             // One more mentioned member: .oldSwapchain (for now set is = nullptr), it's touched upon later but if the swap chain is invalid/unoptimized, we need to create a new one and additionally point to the (now unoptimized/invalid) old swap chain.
+                // In cases where we need to create a new swap chain, pass the old Swap Chain in .oldSwapchain, and then destroy the old swap chain whenever it's finished its work. (you can know if it's finished working w/ a semaphore)
         };
 
         // we give the logical device because a swap chain object is created for that specific, logical (and thus physical) device -- we're using the capabilities of the physical device, and by proxy the logical device's
@@ -1236,6 +1308,7 @@ int main()
 {
 	try
 	{
+        outputFile << get_current_time() << " | Starting" << std::endl;
 		HelloTriangleApplication app;
 		app.run();
 	}
@@ -1245,6 +1318,7 @@ int main()
 		return EXIT_FAILURE;
 	}
 
+    outputFile << get_current_time() << " | Exiting" << std::endl;
     std::cout << "\tSuccessfully Ended!\n";
 	return EXIT_SUCCESS;
 }
