@@ -229,6 +229,9 @@ class HelloTriangleApplication
 
     void drawFrame()
     {
+
+        outputFile << get_current_time() << " | Beginning drawFrame" << std::endl;
+
         // Waits for the logicalDevice's fence state to be true before continuing past this line.
             // The first parameter is an array of fences (we only have one so we just pass one fence object) that we want to wait upon
             // The second parameter specifies if we want to wait for either: one of the fences to be signaled, or for all the fences to be signaled BEFORE returning, resulting in a wait within this line.
@@ -254,7 +257,7 @@ class HelloTriangleApplication
         {
             std::cout << "HOW'D YOU GET HERE?\n";
             recreateSwapChain(); // And yeah, won't ever get here, but if it does, we need to recreate the swap chain (duh) because the swap chain no longer works.
-            return;
+            return; // note: we return here because we don't want to present the image (UNLIKE BELOW W/ SUBOPTIMAL)
         }
 
         if ( result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR ) // If the acquisition of an image failed, just stop the program, nothing special.
@@ -323,10 +326,13 @@ class HelloTriangleApplication
             // There are no other success codes than eSuccess; on any error code, presentKHR already threw an exception.
             assert(result == vk::Result::eSuccess);
         }
+        // note: even after the recreation of the swapChain, it applies to the NEXT call to drawFrame() -- the "suboptimal" image was drawn and presented, we didn't skip its presentation.
 
         // We just need to increment the wait_frameIndex to cycle through the index to assign each semaphore a unique index so that it isn't tracking the same thing.
         // Modulo is used cleverly here, remember it: the moment it reaches the cap (like w/ the BLP!), it resets back to zero. It's equivalent to just doing if (wait_frameIndex >= FramesFlight) wait_frameIndex=0;
         wait_frameIndex = (wait_frameIndex + 1) % MAX_FRAMES_IN_FLIGHT;
+
+        outputFile << get_current_time() << " | Exiting drawFrame" << std::endl;
     }
 
 
@@ -608,6 +614,8 @@ class HelloTriangleApplication
         // otherwise, it'll produce wrong results as it's using the old surface size.
     void recreateSwapChain()
     {
+        outputFile << get_current_time() << " | Beginning the Recreation of the swap chain" << std::endl;
+
         logicalDevice.waitIdle(); // blocks the CPU (won't go beneath this line): waits for the GPU to not be executing anything (be idle) before recreating the entire swap chain.
 
         // Clean up the swap chain and its image views before re-creating them below.
@@ -616,6 +624,8 @@ class HelloTriangleApplication
         createSwapChain();
         // As a result of changing the swap chain, we also need to change our image views as the image views are supposed to be referencing the current swap chain's images, not the old one.
         createImageViews();
+
+        outputFile << get_current_time() << " | Finished the Recreation of the swap chain" << std::endl;
     }
 
 
