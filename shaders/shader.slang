@@ -11,7 +11,7 @@ struct VertexInput {
 
 struct VertexOutput {
     float3 color; // float3, in this context, isn't xyz position, it's just RGB.
-    float4 sv_position : SV_Position; // 'SV_Position' (not the member variable) tells the GPU this is sv_position variable is for the vertex's position.
+    float4 sv_position : SV_Position; // 'SV_Position' (not the member variable) tells the GPU this sv_position variable is for the vertex's position.
 };
 
 // This function is called upon for EVERY vertex. Calculates the position and per-vector data, like color.

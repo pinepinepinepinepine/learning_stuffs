@@ -96,6 +96,9 @@ class HelloTriangleApplication
     std::vector<vk::raii::CommandBuffer> commandBuffers;
         // commandBuffer(s) is now a vector due to us wanting to have multiple frames in flight: each frame needs its own command buffer.
 
+    vk::raii::Buffer vertexBuffer = nullptr; // the buffer that'll be used to store/house vertex date (duh)
+    vk::raii::DeviceMemory vertexBufferMemory = nullptr; // the handle to the allocated GPU memory reserved for the vertex buffer
+
     // see big_notes for an elaboration.
     // semaphore = forces GPU to wait; fence = forces CPU to wait.
     std::vector<vk::raii::Semaphore> presentCompleteSemaphore; // To signal an image has been grabbed from the swap chain, and is ready for rendering
@@ -162,8 +165,11 @@ class HelloTriangleApplication
 
         createGraphicsPipeline(); // For an explanation of the graphics pipeline, see BIG_NOTES
 
-        createCommandPool(); // see functions for elaboration
-        createCommandBuffers();
+        createCommandPool(); // see function for elaboration
+
+        createVertexBuffer();
+
+        createCommandBuffers(); // see function for elaboration
 
         createSyncObjects(); // see big_notes for what sync objects are
 
@@ -1228,6 +1234,85 @@ class HelloTriangleApplication
         commandBuffers[wait_frameIndex].pipelineBarrier2( dependency_info );
     }
 
+    void createVertexBuffer()
+    {
+        // You should know this by now, but I'm just regurgitating it.
+        // A buffer is a chunk of memory, which starts off empty, but gets populated by some arbitrary data. We're making a buffer here to store vertex data, and the reason we're allocating buffer memory ourselves here is because it isn't automatic.
+            // We are responsible for memory management, including buffers.
+
+        vk::BufferCreateInfo bufferInfo {
+            .size        = sizeof( vertices[0] ) * vertices.size(), // .size sets the buffer's reserved memory in bytes: gets the size of a single vertex in bytes, and multiply it by the amount of vertices in the container.
+            .usage       = vk::BufferUsageFlagBits::eVertexBuffer,  // .usage specifies which purpose the data inside of the buffer will be used for -- you can specify multiple purposes with bitwise OR.
+            .sharingMode = vk::SharingMode::eExclusive              // similarily with images inside of the swap chain, buffers can be owned by an exclusive queue family, or concurrently be owned by multiple queue families. We're only using the eGraphics queue, so it's exclusive.
+        };      // Note: we are NOT assigning the queue family here, we're just saying it'll be exclusive/owned by a single queue.
+            // There's also a .flags member, which is used to configure sparse buffer memory. We're not needing it right now, so we're leaving it as be, defaulted to 0.
+
+        // and similiarily with a bunch of other constructors for Vulkan objects, give the device and the information we just specified above (buffer info) to actually create a vertex buffer.
+        vertexBuffer = vk::raii::Buffer( logicalDevice, bufferInfo );
+            // an IMPORTANT notice: for GPU buffers, you NEED to explicitly allocate memory towards it, unlike with CPU's commandPool + commandBuffers -- it is automatic after object creation.
+            // right now, all we have is a handle to a vertexBuffer which information of what is supposed to be inside of it: we need to actually allocate the memory inside the GPU.
+
+        // The first step to ACTUALLY allocate memory inside the GPU is to get the memory requirements of the buffer. (REMEMBER: THIS IS ONLY NEEDED FOR GPU BUFFERS)
+        // struct vk::MemoryRequirements contains three member variables:
+            // .size: the size of the required memory in bytes (it MAY differ from bufferInfo.size)
+            // .alignment: the offset in bytes from where the buffer actually begins in the allocated region of memory (depends on bufferInfo's .usage and .flags)
+                //        this does NOT mean it shrinks the buffer memory size to "pad", it just shifts the address by X bytes to then begin the buffer itself at that shifted address
+            // .memoryTypeBits: the bit field of memory types that are suitable for the buffer -- this is NOT specified by .usage and isn't manually set, vulkan sets this automatically
+                // graphics card themselves offer different types of memory to allocate from, and each type of memory varies in terms of allowed operations and performance characteristics, and it's up to us to find the right memory type.
+        vk::MemoryRequirements memoryRequirements = vertexBuffer.getMemoryRequirements();
+        // Then properly fill out the Info struct with whatever requirements.
+        vk::MemoryAllocateInfo memoryAllocateInfo {
+            .allocationSize  = memoryRequirements.size, // the byte size to actually allocate for our buffer
+            .memoryTypeIndex = findGPUBufferMemoryType( memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent )
+                // for the first parameter of findGPUBufferMemoryType(), we're just passing the basic buffer memory requirements (NOT including the special properties we want, which is param2) to find the barebones support for this buffer.
+                // the second param is the special properties we require of the memory type -- we want to map the memory type to the CPU for access to our vertices, hence vk::MemoryPropertyFlagBits::eHostVisible
+        };
+
+        // Then the second step is to construct vk::raii::DeviceMemory to actually allocate the memory within the GPU!
+        // at this point, we've allocated memory onto the GPU, but the vertexBuffer object isn’t using it yet, hence vk::raii::Buffer::bindBufferMemory
+        vertexBufferMemory = vk::raii::DeviceMemory( logicalDevice, memoryAllocateInfo );
+        // first parameter specifies the memory handle to 'bind' the buffer to -- where this buffer's data exists.
+        // second parameter is the offset within this region of memory (just keep it zero) -- if the offset is non-zero, then it is required to be divisible by memRequirements.alignment
+        vertexBuffer.bindMemory( *vertexBufferMemory, 0 );
+    }
+
+    // finds the right type of memory to use whenever allocating memory into GPU buffers.
+        // typeFilter is a bitmask of memory types that are suitable/requested.
+
+    uint32_t findGPUBufferMemoryType( uint32_t typeFilter, vk::MemoryPropertyFlags properties )
+    {
+        // query this GPU for its available types of memory to choose from whenever allocating GPU buffers
+        vk::PhysicalDeviceMemoryProperties memProperties = physicalDevice.getMemoryProperties();
+        // struct vk::PhysicalDeviceMemoryProperties contains two array member variables:
+            // .memoryTypes: the GPU's supported memory types
+            // .memoryHeaps: distinct memory resources, such as dedicated VRAM -- if the dedicated VRAM runs out, we can manually swap memory/space with standard RAM. The different types of memory exist within these heaps.
+                // just heads up: heaps matters for performance, but they don't elaborate upon it -- study it yourself later!
+
+        for ( uint32_t i = 0; i < memProperties.memoryTypeCount; i++ )
+        {
+            // operator<< shifts the bits by the right-hand value (i), starting from the left-hand element in the bit (however, the index 0 is at the right of the byte, 7 is at the left)
+            // the proper terminology is from most significant bit (instead of the left-most) to least significant (instead of the right-most bit), and the indexing of a bit starts from the least important to the most important.
+            // therefore, a bit index of 0 is the least significant bit (the right-most)
+            // it's a little weird, but for creating bitmasks to check them against another bitmask, we start with 1 instead of 0 (whenever using <<).
+            // typeFilter & ( 1 << i ) creates a temporary bitmask for comparison: it only sets the i-th least significant of typeFilter, leaving the rest to zero.
+            // if ( typeFilter & ( 1 << i ) ) is non-zero, it means the bit flag at index i is a suitable bit flag (the rest of the flags are zero due to << usage), so return the index (which in turn tells us the memory type to use).
+                // this entire ordeal just tells us IF the memory type is suitable to begin with for the buffer we want (in our case, a vertex buffer)
+
+            // the second part specifies the desired properties bits ASIDE from just looking for a suitable canditate that'll simply work.
+            // memoryTypes[] consists of individual vk::MemoryType structs, structs which specify the heap and properties of each memory type.
+            // the "properties of each memory type" define the special features of the memory type, such as being able to map it (AKA be able to point to it with a pointer) so we can access it within the CPU
+                // the flag bit that allows mapping the memory type is vk::MemoryPropertyFlagBits::eHostVisible
+                // we also need another flag bit, vk::MemoryPropertyFlagBits::eHostCoherent -- EXPLAINED LATER WHEN WE MAP THE MEMORY.
+
+            // so in turn, the entire if statement reads like so:
+            // if this memory type is suitable (left-most of &&) for this buffer, AND (&&) supports these special, required features (right-most of &&), return its bit index, i, to use it as our buffer's allocated memory type.
+                // the reason we == properties instead of > 0 is because we might have more than one required memory type properties, so we need the support of ALL properties instead of just one
+                    // param properties is a bitmask of ALL zero (00000000), EXCEPT when assigning desired flag bits, it changes that bit flag (within the currently empty bitmask) to be 1, indicating that desired flag is present.
+            if ( ( typeFilter & ( 1 << i ) ) && ( ( memProperties.memoryTypes[i].propertyFlags & properties ) == properties ) )
+                return i;
+        }
+        throw std::runtime_error("failed to find suitable memory type!");
+    }
 
     void createSyncObjects()
     {
