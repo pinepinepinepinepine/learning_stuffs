@@ -167,7 +167,7 @@ class HelloTriangleApplication
 
         createCommandPool(); // see function for elaboration
 
-        createVertexBuffer();
+        createVertexBuffer(); // see function for elaboration
 
         createCommandBuffers(); // see function for elaboration
 
@@ -1274,6 +1274,11 @@ class HelloTriangleApplication
         // first parameter specifies the memory handle to 'bind' the buffer to -- where this buffer's data exists.
         // second parameter is the offset within this region of memory (just keep it zero) -- if the offset is non-zero, then it is required to be divisible by memRequirements.alignment
         vertexBuffer.bindMemory( *vertexBufferMemory, 0 );
+
+        // a pointer to our vertex buffer's memory -- we need to do this to actually grab ahold of the vertex data, otherwise it's inaccessible.
+        // first parameter is the offset (here, zero -- we want the whole thing), and the second parameter is the byte size of the region we want to grab ahold of (here, size of the entire butter -- we want the whole thing)
+        // think of it as a rectangular window: we start at the first point (offset 0, first param) of the rectangle, and cover the entire area of the rectangle (.size of the buffer, second param)
+        void* data = vertexBufferMemory.mapMemory( 0, bufferInfo.size );
     }
 
     // finds the right type of memory to use whenever allocating memory into GPU buffers.
