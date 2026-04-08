@@ -173,6 +173,8 @@ class HelloTriangleApplication
         // Similarily with a vector of command buffers, every frame needs its own respective semaphore and fence to track it, hence we're making it a vector.
     uint32_t wait_frameIndex = 0; // To assign semaphores their respective frames to track.
 
+    bool framebufferResized = false;
+
     void initWindow() {
 
         // This initializes the GLFW library -- it starts it up -- sets up internal state, memory, platform specific resources, etc. Returns GLFW_TRUE if successful.
@@ -188,6 +190,28 @@ class HelloTriangleApplication
         // This creates the window, and by default, will show it -- you don't have to do ShowWindow like in win32.
         // glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE); To set its visibility: GLFW_FALSE == hidden, glfwShowWindow(window) to show it.
         window = glfwCreateWindow( WIDTH, HEIGHT, "Vulkan", nullptr, nullptr );
+
+        // With win32, you can store pointers inside a window instance to transmit data ( SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)this) ) -- this is the same thing but with GLFW
+            // We're doing this so we can refer to this (second param - this class, helloTriangleApplication) framebufferResized inside of the callback
+        glfwSetWindowUserPointer(window, this);
+        // this function is pretty much equivalent to specifying what happens in a window after WM_SIZE is passed within the message loop w/ Win32
+            // Essentially: whenever this window (first param) sends WM_SIZE (window gets resized, glfwSetFramebufferSizeCallback), call framebufferResizeCallback() (second parameter)
+            // An important note is we're passing the function as a pointer to glfwSetFramebufferSizeCallback ( hence the lack of () ) -- GLFW calls framebufferResizeCallback() itself and passes window + width/height.
+        glfwSetFramebufferSizeCallback( window, framebufferResizeCallback );
+
+    }
+
+    // the callback is static because GLFW can't call a member function with a this-> pointer (we're inside class HelloTriangleApplication, functions implicitly have this->)
+    static void framebufferResizeCallback(GLFWwindow* window, int width, int height)
+    {
+        // same thing as w/ win32 ( reinterpret_cast<HelloTriangleApplication*>(GetWindowLongPtr(hwnd, GWLP_USERDATA)) ): its just grabbing the user data pointer from this window
+        auto app = reinterpret_cast<HelloTriangleApplication*>( glfwGetWindowUserPointer( window ) );
+        app->framebufferResized = true;
+
+        // this technically does nothing for us (specifically me) because our we check (result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR) already covers window resizes
+        // We're just being explicit: if the GLFW window sends WM_SIZE (not literally... kinda, but win32 equivalent for GLFW), present the last image as normal (suboptimal, itll work)
+        // and also recreate the swap chain for the next images to actually be sized appropriately
+        // We are just being explicit. Also, some platforms/drivers lack the vk::Result::eSuboptimalKHR and eError results, so it's good practice.
     }
 
     void initVulkan() {
@@ -232,16 +256,14 @@ class HelloTriangleApplication
 
         outputFile << get_current_time() << " | Beginning drawFrame" << std::endl;
 
-        // Waits for the logicalDevice's fence state to be true before continuing past this line.
+        // Waits for the logicalDevice's fence state to be signaled (true) before continuing past this line.
             // The first parameter is an array of fences (we only have one so we just pass one fence object) that we want to wait upon
             // The second parameter specifies if we want to wait for either: one of the fences to be signaled, or for all the fences to be signaled BEFORE returning, resulting in a wait within this line.
             // Third parameter is a fail safe: if we  waited for the maximum integer number in nanoseconds with this wait, disable the timeout (because it means something went wrong) and continue
-        auto fenceResult = logicalDevice.waitForFences( *drawFence[wait_frameIndex] , vk::True, UINT64_MAX );
+        auto fenceResult = logicalDevice.waitForFences( *drawFence[wait_frameIndex], vk::True, UINT64_MAX );
 
         if (fenceResult != vk::Result::eSuccess)
 			throw std::runtime_error("failed to wait for fence!"); // Self explanatory: if for some reason waitForFences() didn't wait (it is expected for it to wait on the line above -- alternatively, we reached 64bit limit), we throw an exception because something went wrong.
-
-        logicalDevice.resetFences( *drawFence[wait_frameIndex] ); // Signal the fence back to unsignaled so that the next iteration can run as expected (OTHERWISE, drawFence is set to signaled, causing waitForFences to never wait)
 
         // First param is the timeout: wait 64bit integer limit in nanoseconds before letting us pass
         // Second param is the semaphore: whenever we've acquired the next image (and finished executing acquireNextImage), signal the semaphore
@@ -266,6 +288,9 @@ class HelloTriangleApplication
             throw std::runtime_error("failed to acquire swap chain image!");
         }
 
+        // UPDATE: if result is eErrorOutOfDateKHR (it CANNOT OCCUR RIGHT NOW BECAUSE WE DIDN'T DEFINE IT AND SUBSEQUENTLY CATCH IT -- RIGHT NOW IT'LL CRASH THE PROGRAM), we MUST set this to unsignaled AFTER we've checked for eErrorOutOfDateKHR
+        // because OTHERWISE the return (from above) causes the next drawFrame to wait till time-expiry due to drawFrame being unsignaled
+        logicalDevice.resetFences( *drawFence[wait_frameIndex] ); // Signal the fence back to unsignaled so that the next iteration can run as expected (OTHERWISE, drawFence is set to signaled, causing waitForFences to never wait)
 
         recordCommandBuffer( imageIndex );
         // Notice: we rerecord the command buffer each time, different each time depending on the image
@@ -295,7 +320,7 @@ class HelloTriangleApplication
         // we can now submit the command buffer to the graphics queue (submitInfo contains the command buffer, which in turn contains the image we just recorded onto it, so thats how we ultimately display images!)
         // First parameter takes an array of vk::SubmitInfo structs (an array because it's more efficient for much larger workloads)
         // Second parameter is the fence that'll be signaled whenever the command buffer finishes execution. (Which will be waited upon for the next frame -- next call to drawFrame()!)
-        graphicsQueue.submit( submitInfo, *drawFence[wait_frameIndex] );
+        graphicsQueue.submit( submitInfo, *drawFence[wait_frameIndex] ); // Fence gets sigaled whenever GPU fully finishes w/ graphics queue, so next call to drawFrame isn't blocked.
 
 
 
@@ -313,13 +338,15 @@ class HelloTriangleApplication
         result = graphicsQueue.presentKHR( presentInfoKHR );
         outputFile << get_current_time() << " | Presenting a new image" << std::endl;
 
-        if ( (result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR) ) // Suboptimal still works to present images to the screen, but just isn't 100% perfect; w/ eErrorOutOfDate, same gimmick as above
+        // you can technically remove the result checks and just use framebufferResized as a check, but i'm keeping it just for the sake of learning/keeping as is.
+        if ( (result == vk::Result::eSuboptimalKHR) || (result == vk::Result::eErrorOutOfDateKHR) || framebufferResized ) // Suboptimal still works to present images to the screen, but just isn't 100% perfect; w/ eErrorOutOfDate, same gimmick as above
         {
-            if (result == vk::Result::eErrorOutOfDateKHR) // we didn't define the macro above, so it should never get here (it'll crash.)
+            if ( result == vk::Result::eErrorOutOfDateKHR ) // we didn't define the macro above, so it should never get here (it'll crash.)
                 std::cout << "WHAT???\n";
 
+            framebufferResized = false;
             outputFile << get_current_time() << " | Recreating the swap chain due to resizing" << std::endl;
-            recreateSwapChain();
+            recreateSwapChain(); // if we don't recreate the swap chain, the swap chain images aren't rendered properly because
         }
         else
         {
@@ -615,6 +642,16 @@ class HelloTriangleApplication
     void recreateSwapChain()
     {
         outputFile << get_current_time() << " | Beginning the Recreation of the swap chain" << std::endl;
+
+        int width = 0, height = 0;
+        glfwGetFramebufferSize(window, &width, &height); // initial check for the size. recreateSwapChain is called whenever the window size changes, hence why it's here.
+            // Window doesn't necessarily have to be minimized here, but if you collapse the window to be zero, it'll also run this loop (aka you drag the window down)
+        while (width == 0 || height == 0) {
+            glfwGetFramebufferSize(window, &width, &height); // grabs the size while inside of the loop: if we're inside this loop, our screen's minimized (0w,0h)
+                // Whenever opening the screen back up again, the size changes to be non-zero, so by setting width+height > 0, we exit the loop (which again, is given from this function)
+            glfwWaitEvents(); // puts GLFW to sleep
+        }
+
 
         logicalDevice.waitIdle(); // blocks the CPU (won't go beneath this line): waits for the GPU to not be executing anything (be idle) before recreating the entire swap chain.
 
@@ -1266,8 +1303,8 @@ class HelloTriangleApplication
         // For every frame in flight, we need a semaphore to track/signal the presentation of it.
         for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
         {
-            presentCompleteSemaphore.emplace_back( logicalDevice, vk::SemaphoreCreateInfo() );
-            drawFence.emplace_back( logicalDevice, vk::FenceCreateInfo( { .flags = vk::FenceCreateFlagBits::eSignaled } ) );
+            presentCompleteSemaphore.emplace_back( logicalDevice, vk::SemaphoreCreateInfo() ); // semaphore is unsignaled on creation because, unlike fence, we don't need it to be signaled (gpu handles this garbage)
+            drawFence.emplace_back( logicalDevice, vk::FenceCreateInfo( { .flags = vk::FenceCreateFlagBits::eSignaled } ) ); // .FLAGS IS KINDA NEEDED HERE BECAUSE OTHERWISE THE FENCE IS UNSIGNALED -- THIS ENSURES FOR THE FIRST TIME WE ENTER DRAWFRAME(), IT'S SIGNALED (SO IT DOESNT WAIT ON THE TIMELIMIT EXPIRY)
         }
 
         // We make a semaphore for every image within the swap chain to signal whether that image has finished rendering.
