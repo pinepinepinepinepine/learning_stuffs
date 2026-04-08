@@ -1,38 +1,10 @@
-#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
-#define GLFW_INCLUDE_VULKAN        // REQUIRED only for GLFW CreateWindowSurface. you could ditch the header right below this in exchange for this #define.
-
-#if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES)
-#	include <vulkan/vulkan_raii.hpp>
-#else
-import vulkan_hpp;
-#endif
-
-#include <GLFW/glfw3.h>
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_raii.hpp>
-#include <tiny_obj_loader.h>
-
-#define GLFW_EXPOSE_NATIVE_WIN32    // Required to define for the #include below -- allows GLFW to show Windows handles (HWND/hInstance access)
-#include <GLFW/glfw3native.h>       // Gives GLFW Native interface for this OS (so allows Win32 Functions on GLFW windows)
-
-#define VK_USE_PLATFORM_WIN32_KHR // Similarily with GLFW, this specifies to Vulkan that you want to get Vulkan's WindowsOS-specific functions (VkWin32SurfaceCreateInfoKHR/vkCreateWin32SurfaceKHR - access to these functions from Vulkan)
-
-#include <tiny_obj_loader.h>
-
-#include <algorithm>
-#include <cstdlib>
-#include <iostream>
-#include <memory>
-#include <stdexcept>
-#include <fstream>
-#include <chrono>
+#include "vertex.cpp"
+#include "random_utils.cpp"
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
 
 std::ofstream outputFile("../garbage_dump.txt");
-auto start_time = std::chrono::steady_clock::now();
-
 
 // Frames in Flight refers to having multiple frames be rendered at once -- the rendering of one frame doesn't interfere with another.
 // This constant defines how many frames should be processed simulatenously
@@ -40,8 +12,6 @@ constexpr int MAX_FRAMES_IN_FLIGHT = 2;
     // We chose 2 because we don't want the CPU to get too far ahead of the GPU -- it's a tradeoff, but generally this is ideal, it allows the CPU and GPU to be working on their own tasks at the same time.
         // If the CPU finishes early, then it'll wait for the GPU to finish rendering before submitting more work.
     // With 3 or more frames in flight, the CPU can get ahead of the GPU, adding frames of latency, which isn't ideal.
-
-
 
 // Validation layers flag if debug. We have to define ourselves what validation layers we will actually want to use.
 const std::vector<char const*> validationLayers = {
@@ -53,45 +23,6 @@ constexpr bool enableValidationLayers = false;
 #else
 constexpr bool enableValidationLayers = true;
 #endif
-
-// This is nothing more than just a handy thingy to know in order to check extensions/libs... do whatever!
-void some_handy_printer( vk::raii::Context* context, std::vector<const char*>* req_layers, std::vector<const char*>* req_extensions  )
-{
-    // For a list of all the supported extensions this app has available, use this.
-    auto extensions = (*context).enumerateInstanceExtensionProperties();
-
-    // For a list of all the supported layers this app uses has available, use this.
-    auto layers = (*context).enumerateInstanceLayerProperties();
-
-    std::cout << "extensions this app has available\n";
-    for (const auto& extension : extensions) {
-        std::cout << '\t' << extension.extensionName << '\n';
-    }
-
-    std::cout << "extensions actually required\n";
-    for (const auto& requiredExtension : *req_extensions ) {
-        std::cout << '\t' << requiredExtension << '\n';
-    }
-
-    std::cout << "layers this app has available\n";
-    for (const auto& layer : layers ) {
-        std::cout << '\t' << layer.layerName << '\n';
-    }
-
-    std::cout << "layers actually required\n";
-    for (const auto& requiredLayer : *req_layers ) {
-        std::cout << '\t' << requiredLayer << '\n';
-    }
-    std::cout << "\n\n";
-}
-
-
-double get_current_time()
-{
-    return std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - start_time ).count();
-}
-
-
 
 class HelloTriangleApplication
 {
@@ -927,12 +858,15 @@ class HelloTriangleApplication
 
             // Vertex Input
         // this struct/state describes the format of the vertex data that'll be passed onto the Vertex Shader.
-        // This happens in two ways: Bindings and Attribute Descriptions.
-            // Bindings: specifies whether the data is per-vertex or per-instance (per group of vertices), and the spacing between data.
-            // Attribute Descriptions: the vertex's attributes (position, format/color, and what binding to load them from and which offset)
-        vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
-        // Due to us using hard-coded vertex data in the vertex shader (shader.slang), we'll specify later that there's no vertex data to load for now. Elaborate upon here https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/00_Vertex_input_description.html.
-            // the .pVertexBindingDescriptions and .pVertexAttributeDescriptions members point to an array of structs that describe details for loading vertex data.
+        // This happens in two ways: Bindings and Attribute Descriptions -- see vertex.cpp's Attribute and Binding Descriptions functions for an elaboration.
+        auto bindingDescription    = Vertex::getBindingDescription();       // Bindings: specifies whether the data is per-vertex or per-instance (per group of vertices), and the spacing between data.
+        auto attributeDescriptions = Vertex::getAttributeDescriptions();    // Attribute Descriptions: the vertex's attributes (position, format/color, and what binding to load them from and which offset)
+        vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
+            .vertexBindingDescriptionCount   = 1,                   // the number of bindings we're using
+            .pVertexBindingDescriptions      = &bindingDescription, // the bindings themselves
+            .vertexAttributeDescriptionCount = static_cast<uint32_t>( attributeDescriptions.size() ), // the number of attributes we have per vertex
+            .pVertexAttributeDescriptions    = attributeDescriptions.data()                           // the attribute data themselves -- again, we pass .data() to allow for pointer arithmetics
+        }; // Old comment, but relevant: the .pVertexBindingDescriptions and .pVertexAttributeDescriptions members point to an array of structs that describe details for loading vertex data.
 
             // Input Assembly
         // this struct describes what kind of geometry will be drawn from the vertices, and if primitive restart (how vertices are grouped into primitives/shapes) should be enabled (can ONLY be enabled for Strip topologies).

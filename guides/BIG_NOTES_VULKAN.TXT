@@ -345,3 +345,38 @@ In summary, semaphores are used to specify the execution order of operations on 
         // As a result, we use std::move to convert the lvalue object (which will be destroyed as it's a temporary reference) into an rvalue (data itself, not tied to a variable) that our commandBuffer'll take, so it no longer references the destroyed object and now owns the object itself.
             // if .front() returned a pointer instead of a reference, then in theory we could just use operator* to dereference the pointer to set commandBuffer's value, but it's a reference, hence std::move.
         // commandBuffer = std::move( vk::raii::CommandBuffers( logicalDevice, commandBuffer_allocationInfo ).front() );
+
+Old slang vertex colours and positions:
+// We're just hardcoding available vertex positions.
+static float2 positions[3] = float2[](
+    float2(0.0, -0.5),
+    float2(0.5, 0.5),
+    float2(-0.5, 0.5)
+);
+
+// We're just hardcoding available vertex colors. (RGB)
+static float3 colors[3] = float3[](
+    float3(1.0, 0.0, 0.0),  // red
+    float3(0.0, 1.0, 0.0),  // green
+    float3(0.0, 0.0, 1.0)   // blue
+);
+
+
+Old Slang vertMain:
+// This function is called upon for EVERY vertex. Calculates the position and per-vector data, like color.
+    // Slang supports multiple entry points in one file, hence why we're calling it "vertMain" instead of "main"
+[shader("vertex")] // Identifies the function as a Vertex Shader; if left out, the GPU won't know what function to call upon to act as the Vertex Shader.
+VertexOutput vertMain(uint vid: SV_VertexID)
+// SV_VertexID is built in: it contains the index of the current vertex, which is usually an index into the original vertex buffer.
+// For our case, since we're just hard-coding the vertices directly above, it's just the vertex's index within the array of vertex data ( positions[vid] ).
+// This function isn't called by us, it's called by the GPU, and the SV_VertexID tells the GPU to "pass the vertex index", giving uint 'vid' value equal to the vertex index.
+{
+    VertexOutput output;
+    output.sv_position = float4( positions[vid], 0.0, 1.0 ); // chooses the position for this vertex from the positions[] array.
+    // float4 means it's a 4-component (4D) vertex. z is depth (we're doing a 2D image, so 0.0),  w is "PERSPECTIVE TRANSFORMATION" (USED FOR PERSPECTIVE CALCULATION)
+    // (you know how when you're far away from an object, it's smaller? yeah. that thing. essentially it scales the size accordingly depending on distance to give the same illusion. future problem.)... keep it 1.0.
+
+    output.color = colors[vid]; // just chooses the color for this vertex from the colors[] array.
+    return output;
+}
+

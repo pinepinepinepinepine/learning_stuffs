@@ -1,0 +1,30 @@
+#pragma once
+
+#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS // for designated initialization w/ vulkan
+#define GLFW_INCLUDE_VULKAN        // REQUIRED only for GLFW CreateWindowSurface. you could ditch the header right below this in exchange for this #define.
+
+#if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES)
+#include <vulkan/vulkan_raii.hpp>
+#else
+import vulkan_hpp;
+#endif
+
+// 3rd party libs
+#include <GLFW/glfw3.h>
+#include <vulkan/vulkan.h>
+#include <tiny_obj_loader.h>
+#include <glm/glm.hpp>
+
+// window stuff
+#define GLFW_EXPOSE_NATIVE_WIN32    // Required to define for the #include below -- allows GLFW to show Windows handles (HWND/hInstance access)
+#include <GLFW/glfw3native.h>       // Gives GLFW Native interface for this OS (so allows Win32 Functions on GLFW windows)
+#define VK_USE_PLATFORM_WIN32_KHR // Similarily with GLFW, this specifies to Vulkan that you want to get Vulkan's WindowsOS-specific functions (VkWin32SurfaceCreateInfoKHR/vkCreateWin32SurfaceKHR - access to these functions from Vulkan)
+
+// std
+#include <algorithm>
+#include <cstdlib>
+#include <iostream>
+#include <memory>
+#include <stdexcept>
+#include <fstream>
+#include <chrono>

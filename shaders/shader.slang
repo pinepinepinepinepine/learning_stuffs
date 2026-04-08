@@ -3,19 +3,11 @@
 // a 3D vector has X and Y axis positions, as well as Z (Depth)
 // a 4D vector has X and Y axis positions, as well as Z (Depth), but also W for "HOMOGENOUS/PERSPECTIVE TRANSFORMATIONS"
 
-// We're just hardcoding available vertex positions.
-static float2 positions[3] = float2[](
-    float2(0.0, -0.5),
-    float2(0.5, 0.5),
-    float2(-0.5, 0.5)
-);
+struct VertexInput {
+    float2 inPosition;
+    float3 inColor;
+};
 
-// We're just hardcoding available vertex colors. (RGB)
-static float3 colors[3] = float3[](
-    float3(1.0, 0.0, 0.0),  // red
-    float3(0.0, 1.0, 0.0),  // green
-    float3(0.0, 0.0, 1.0)   // blue
-);
 
 struct VertexOutput {
     float3 color; // float3, in this context, isn't xyz position, it's just RGB.
@@ -25,17 +17,14 @@ struct VertexOutput {
 // This function is called upon for EVERY vertex. Calculates the position and per-vector data, like color.
     // Slang supports multiple entry points in one file, hence why we're calling it "vertMain" instead of "main"
 [shader("vertex")] // Identifies the function as a Vertex Shader; if left out, the GPU won't know what function to call upon to act as the Vertex Shader.
-VertexOutput vertMain(uint vid: SV_VertexID)
-// SV_VertexID is built in: it contains the index of the current vertex, which is usually an index into the original vertex buffer.
-// For our case, since we're just hard-coding the vertices directly above, it's just the vertex's index within the array of vertex data ( positions[vid] ).
-// This function isn't called by us, it's called by the GPU, and the SV_VertexID tells the GPU to "pass the vertex index", giving uint 'vid' value equal to the vertex index.
+VertexOutput vertMain( VertexInput input )
 {
     VertexOutput output;
-    output.sv_position = float4(positions[vid], 0.0, 1.0); // chooses the position for this vertex from the positions[] array.
+    output.sv_position = float4( input.inPosition, 0.0, 1.0 );
     // float4 means it's a 4-component (4D) vertex. z is depth (we're doing a 2D image, so 0.0),  w is "PERSPECTIVE TRANSFORMATION" (USED FOR PERSPECTIVE CALCULATION)
     // (you know how when you're far away from an object, it's smaller? yeah. that thing. essentially it scales the size accordingly depending on distance to give the same illusion. future problem.)... keep it 1.0.
 
-    output.color = colors[vid]; // just chooses the color for this vertex from the colors[] array.
+    output.color = input.inColor;
     return output;
 }
 
