@@ -37,3 +37,7 @@ double get_current_time()
     return std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - start_time ).count();
 }
 
+glm::vec3 rgb_float( glm::vec3 o_rgb )
+{
+    return { o_rgb.r / 255,  o_rgb.g / 255,  o_rgb.b / 255 };
+}

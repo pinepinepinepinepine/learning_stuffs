@@ -1,5 +1,4 @@
 #include "vertex.cpp"
-#include "random_utils.cpp"
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
@@ -96,8 +95,8 @@ class HelloTriangleApplication
     std::vector<vk::raii::CommandBuffer> commandBuffers;
         // commandBuffer(s) is now a vector due to us wanting to have multiple frames in flight: each frame needs its own command buffer.
 
-    vk::raii::Buffer vertexBuffer = nullptr; // the buffer that'll be used to store/house vertex date (duh)
-    vk::raii::DeviceMemory vertexBufferMemory = nullptr; // the handle to the allocated GPU memory reserved for the vertex buffer
+    vk::raii::Buffer vertexBuffer = nullptr; // the buffer that'll be used to store/house vertex data (duh) -- this does not necessarily store anything, just references memory (in our case, vertexBufferMemory)
+    vk::raii::DeviceMemory vertexBufferMemory = nullptr; // the handle to the allocated GPU memory reserved for the vertex buffer -- this will ACTUALLY contain the vertex data
 
     // see big_notes for an elaboration.
     // semaphore = forces GPU to wait; fence = forces CPU to wait.
@@ -1172,8 +1171,15 @@ class HelloTriangleApplication
 
         commandBuffers[wait_frameIndex].setScissor( 0, vk::Rect2D( vk::Offset2D( 0, 0 ), swapChain_Extent_ImageResolution ) ); // same thing as the above, just formatted a little differently, but it's a rectangle of size 0,0 -> width, height
 
-        commandBuffers[wait_frameIndex].draw(3, 1, 0, 0); // actually draw the thing.
-            // First parameter: vertexCount - how many vertices we're drawing (we don't have a vertex buffer)
+        // this tells the command buffer where to read vertex data from (second parameter)
+        commandBuffers[wait_frameIndex].bindVertexBuffers( 0, *vertexBuffer, {0} );
+            // vertexBuffer experiences these series of events:
+                // vertexBuffer.bindMemory( *vertexBufferMemory, 0 ); -> void* data = vertexBufferMemory.mapMemory( 0, bufferInfo.size ); -> memcpy( data, vertices.data(), bufferInfo.size );
+                // We copy the vertices.data() into void* data pointer which is pointing to vertexBufferMemory (giving vertexBufferMemory the vertices), and due to us binding vertexBufferMemory into vertexBuffer (meaning vertexBuffer is referencing vertexBufferMemory, which contains actual data)
+                // we can use *vertexBuffer as our second parameter w/ bindVertexBuffers to read the original vertex data -- we don't pass the memory itself (we pass the buffer) because it's how bindVertexBuffer is set up to read it (the buffer is referencing the memory anyway, so it's no problem)
+
+        commandBuffers[wait_frameIndex].draw( static_cast<uint32_t>( vertices.size() ), 1, 0, 0 ); // actually draw the thing.
+            // First parameter: vertexCount - how many vertices we're drawing (we have a vertex buffer, so we're just seeing how many vertices are in our vertices container)
             // Second: instanceCount - Instanced rendering (use 1 if we're not doing that)
             // Third: firstVertex - Used as an offset into the vertex buffer, defines the lowest value of SV_VertexId -- if it's above 0, we're skipping some vertices to not be shaded.
             // Fourth: firstInstance - Used as an offset for instanced rendering, defines the lowest value of SV_InstanceID -- if it's above 0, we're skipping some instances to not be shaded (we have only one instance, so...)
@@ -1273,12 +1279,23 @@ class HelloTriangleApplication
         vertexBufferMemory = vk::raii::DeviceMemory( logicalDevice, memoryAllocateInfo );
         // first parameter specifies the memory handle to 'bind' the buffer to -- where this buffer's data exists.
         // second parameter is the offset within this region of memory (just keep it zero) -- if the offset is non-zero, then it is required to be divisible by memRequirements.alignment
-        vertexBuffer.bindMemory( *vertexBufferMemory, 0 );
+        vertexBuffer.bindMemory( *vertexBufferMemory, 0 ); // Without this, vertexBuffer is NOT referencing ANY memory, and thus won't be useful.
 
-        // a pointer to our vertex buffer's memory -- we need to do this to actually grab ahold of the vertex data, otherwise it's inaccessible.
-        // first parameter is the offset (here, zero -- we want the whole thing), and the second parameter is the byte size of the region we want to grab ahold of (here, size of the entire butter -- we want the whole thing)
+        // a pointer to our vertex buffer's memory (left of .mapMemory) -- we need to do this to actually grab ahold of the vertex data, otherwise it's inaccessible.
+        // first parameter is the offset (here, zero -- we want the whole thing), and the second parameter is the byte size of the region (within vertexBufferMemory) we want to grab ahold of (here, size of the entire butter -- we want the whole thing)
         // think of it as a rectangular window: we start at the first point (offset 0, first param) of the rectangle, and cover the entire area of the rectangle (.size of the buffer, second param)
-        void* data = vertexBufferMemory.mapMemory( 0, bufferInfo.size );
+        void* data = vertexBufferMemory.mapMemory( 0, bufferInfo.size ); // this begins the access of vertexBufferMemory within the CPU
+        // memcpy copies a block of memory from source (2nd param) to destination (1st param)
+            // the exact number of bytes to copy is specified by the third param (so we're grabbing the entirety of the buffer -- there is no byte offset, copy from the start of the buffer)
+        memcpy( data, vertices.data(), bufferInfo.size );
+            // so all this does is store the vertices.data() inside vertexBufferMemory through the void* data pointer.
+        vertexBufferMemory.unmapMemory(); // this ends the access of vertexBufferMemory within the CPU
+            // an analogy for mapMemory and unmapMemory (aside from other similar functions like beginRendering + endRendering) is like a treasure chest.
+            // once we mapMemory, the treasure chest is open and we can access the contents of the chest within CPU memory.
+            // once we unmapMemory, the treasure chest is sealed (but the contents itself are still within the chest, we just can't open the chest), preventing us from accessing the contents of the chest within CPU memory.
+                // this also means that the void* data pointer is now invalid and pointing to garbage -- DO NOT use data after this point
+
+
     }
 
     // finds the right type of memory to use whenever allocating memory into GPU buffers.

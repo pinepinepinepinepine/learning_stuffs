@@ -48,7 +48,7 @@ struct Vertex
 // Previously we just hard-coded the vertices' positions within shader.slang, but now we're combining vertices into a single vector.
 // This is called interleaving vertex attributes.
 const std::vector<Vertex> vertices {
-    { {  0.0f, -0.5f  }, {  1.0f, 0.0f, 0.0f } },
-    { {  0.5f,  0.5f  }, {  0.0f, 1.0f, 0.0f } },
-    { { -0.5f,  0.5f  }, {  0.0f, 0.0f, 1.0f } }
+    { {  0.0f, -0.5f  }, rgb_float( { 134, 181, 242 } ) },
+    { {  0.5f,  0.5f  }, rgb_float( { 79, 76, 237 } ) },
+    { { -0.5f,  0.5f  }, rgb_float( { 166, 127, 245 } ) }
 };
