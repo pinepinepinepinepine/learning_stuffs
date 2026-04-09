@@ -1367,7 +1367,7 @@ class HelloTriangleApplication
         // send the command buffer into the graphics queue to be actually executed, and thus to actually copy the contents over.
         graphicsQueue.submit( vk::SubmitInfo{ .commandBufferCount = 1, .pCommandBuffers = &*commandCopyBuffer }, nullptr );
 
-        // instead of passing nullptr as submitInfo's fence, might be a good idea to actually use fence, but whatever, we're lazy,
+        // instead of passing nullptr as submit()'s fence argument, might be a good idea to actually use a fence (instead of nothing), but whatever, we're lazy,
         // obviously a fence is better because it'll allow synchronization, but anyway lets just wait until the graphic queue is empty altogether because. we. are. lazy.
         graphicsQueue.waitIdle();
     }
