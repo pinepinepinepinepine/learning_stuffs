@@ -56,5 +56,8 @@ const std::vector<Vertex> vertices {
 
 // represents the index buffer's indices -- the specified indices'll be used to make a rectangle
 const std::vector<uint16_t> indices = {
+    // also, the GPU will make triangles (or whatever topology we specified) in sequential order from this:
+    // the first 3 vertices make the first triangle; then the last 3 make the second triangle
+    // (so it draws index 0 -> 1 -> 2 -> triangle one -> 2 -> 3 -> 0 -> triangle two)
     0, 1, 2, 2, 3, 0
 };
