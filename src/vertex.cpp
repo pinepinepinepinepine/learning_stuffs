@@ -48,7 +48,13 @@ struct Vertex
 // Previously we just hard-coded the vertices' positions within shader.slang, but now we're combining vertices into a single vector.
 // This is called interleaving vertex attributes.
 const std::vector<Vertex> vertices {
-    { {  0.0f, -0.5f  }, rgb_float( { 134, 181, 242 } ) },
-    { {  0.5f,  0.5f  }, rgb_float( { 79, 76, 237 } ) },
-    { { -0.5f,  0.5f  }, rgb_float( { 166, 127, 245 } ) }
+    { { -0.5f, -0.5f  }, rgb_float( { 134, 181, 242 } ) },
+    { {  0.5f, -0.5f  }, rgb_float( { 79, 76, 237 } ) },
+    { {  0.5f,  0.5f  }, rgb_float( { 166, 127, 245 } ) },
+    { { -0.5f,  0.5f  }, rgb_float( { 124, 88, 196 } ) }
+};
+
+// represents the index buffer's indices -- the specified indices'll be used to make a rectangle
+const std::vector<uint16_t> indices = {
+    0, 1, 2, 2, 3, 0
 };

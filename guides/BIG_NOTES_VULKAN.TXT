@@ -474,6 +474,20 @@ The buffer copy command requires a specific queue family: VK_QUEUE_TRANSFER_BIT
 However, any queue family with the eGraphics or eCompute flag already implicitly supports VK_QUEUE_TRANSFER_BIT, so we don't need to explicitly list it within our vk::QueueFlags requiredQueues object.
 
 
-
-
 See https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/02_Staging_buffer.html#_conclusion for some handy info about allocation buffers -- might come in handy later.
+
+
+
+Some glaring issue with our program right now is that we're missing an index buffer.
+Often times, if rendering multiple triangles/objects, you'll often share vertices between those objects.
+    https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/03_Index_buffer.html#_introduction: see the provided visual for elaboration.
+
+So, to avoid redundancy in having to specify the same vertex for multiple objects, we create an index buffer to reuse existing vertices.
+
+
+The previous code for drawing vertices directly WITHOUT indices (now we use drawIndexed):
+        //commandBuffers[wait_frameIndex].draw( static_cast<uint32_t>( vertices.size() ), 1, 0, 0 ); // actually draw the thing.
+            // First parameter: vertexCount - how many vertices we're drawing (we have a vertex buffer, so we're just seeing how many vertices are in our vertices container)
+            // Second: instanceCount - Instanced rendering (use 1 if we're not doing that)
+            // Third: firstVertex - Used as an offset into the vertex buffer, defines the lowest value of SV_VertexId -- if it's above 0, we're skipping some vertices to not be shaded.
+            // Fourth: firstInstance - Used as an offset for instanced rendering, defines the lowest value of SV_InstanceID -- if it's above 0, we're skipping some instances to not be shaded (we have only one instance, so...)

@@ -98,6 +98,10 @@ class HelloTriangleApplication
     vk::raii::Buffer vertexBuffer = nullptr; // the buffer that'll be used to store/house vertex data (duh) -- this does not necessarily store anything, just references memory (in our case, vertexBufferMemory)
     vk::raii::DeviceMemory vertexBufferMemory = nullptr; // the handle to the allocated GPU memory reserved for the vertex buffer -- this will ACTUALLY contain the vertex data
 
+    // same logic/idea with the Vertex Buffer right above.
+    vk::raii::Buffer indexBuffer = nullptr;
+    vk::raii::DeviceMemory indexBufferMemory = nullptr;
+
     // see big_notes for an elaboration.
     // semaphore = forces GPU to wait; fence = forces CPU to wait.
     std::vector<vk::raii::Semaphore> presentCompleteSemaphore; // To signal an image has been grabbed from the swap chain, and is ready for rendering
@@ -167,6 +171,8 @@ class HelloTriangleApplication
         createCommandPool(); // see function for elaboration
 
         createVertexBuffer(); // see function for elaboration
+
+        createIndexBuffer(); // see function for elaboration
 
         createCommandBuffers(); // see function for elaboration
 
@@ -1179,13 +1185,15 @@ class HelloTriangleApplication
                 // We copy the vertices.data() into void* data pointer which is pointing to vertexBufferMemory (giving vertexBufferMemory the vertices), and due to us binding vertexBufferMemory into vertexBuffer (meaning vertexBuffer is referencing vertexBufferMemory, which contains actual data)
                 // we can use *vertexBuffer as our second parameter w/ bindVertexBuffers to read the original vertex data -- we don't pass the memory itself (we pass the buffer) because it's how bindVertexBuffer is set up to read it (the buffer is referencing the memory anyway, so it's no problem)
 
-        commandBuffers[wait_frameIndex].draw( static_cast<uint32_t>( vertices.size() ), 1, 0, 0 ); // actually draw the thing.
-            // First parameter: vertexCount - how many vertices we're drawing (we have a vertex buffer, so we're just seeing how many vertices are in our vertices container)
-            // Second: instanceCount - Instanced rendering (use 1 if we're not doing that)
-            // Third: firstVertex - Used as an offset into the vertex buffer, defines the lowest value of SV_VertexId -- if it's above 0, we're skipping some vertices to not be shaded.
-            // Fourth: firstInstance - Used as an offset for instanced rendering, defines the lowest value of SV_InstanceID -- if it's above 0, we're skipping some instances to not be shaded (we have only one instance, so...)
+        // this tells the command buffer where to read index data from (first parameter now instead of second? ok.)
+        commandBuffers[wait_frameIndex].bindIndexBuffer( *indexBuffer, 0, vk::IndexType::eUint16 );
 
-        commandBuffers[wait_frameIndex].endRendering(); // end the rendering here.
+        // see BIG_NOTES for the old version which draws vertices directly w/o indices, and for a detailed explanation.
+        commandBuffers[wait_frameIndex].drawIndexed( indices.size(), 1, 0, 0, 0 );
+        // TODO https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/03_Index_buffer.html#_using_an_index_buffer, add comments, but dude like... just use common sense and hover over drawIndexed(), you know by now how shit works.
+
+        // end the rendering here.
+        commandBuffers[wait_frameIndex].endRendering();
 
         // After rendering, transition the swapchain image to vk::ImageLayout::ePresentSrcKHR
         transition_image_layout(
@@ -1284,6 +1292,43 @@ class HelloTriangleApplication
         // second parameter is the offset within this region of memory (just keep it zero) -- if the offset is non-zero, then it is required to be divisible by memRequirements.alignment
         buffer.bindMemory( *bufferMemory, 0 ); // Without this, the buffer is NOT referencing ANY memory, and thus won't be useful -- the buffer object w/o a referenced memory region is pointless.
 
+    }
+
+    // This function is pretty much an exact copy of createVertexBuffer (but for indices) and so works in much the same way -- read createVertexBuffer() for an explanation.
+    void createIndexBuffer()
+    {
+        // uses createGPUBuffer for creation instead of re-writing the staging buffer creation manually as seen within createVertexBuffer() -- see that function for an explanation/explicity.
+        vk::DeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+        vk::raii::Buffer stagingBuffer({});
+        vk::raii::DeviceMemory stagingBufferMemory({});
+
+        // actually creates the (temporary) staging buffer
+        createGPUBuffer(
+            bufferSize,
+            vk::BufferUsageFlagBits::eTransferSrc,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            stagingBuffer,
+            stagingBufferMemory
+        );
+
+        // transfers data into the (temporary) staging buffer to mule/copy it over into the actual index buffer
+        void* data = stagingBufferMemory.mapMemory( 0, bufferSize );
+        memcpy( data, indices.data(), (size_t) bufferSize );
+        stagingBufferMemory.unmapMemory();
+
+        // creates the actual, optimized index buffer
+        createGPUBuffer(
+            bufferSize,
+            vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            indexBuffer,
+            indexBufferMemory
+        );
+
+        // copy the entire contents of the staging buffer into the index buffer.
+        copyBuffer( stagingBuffer, indexBuffer, bufferSize );
+
+        // This function is INSANELY similar to createVertexBuffer. hell, it's probably a good idea to make it into an abstracted function similarily w/ createGPUBuffer but for staging buffers... whatever! future problem!
     }
 
 
