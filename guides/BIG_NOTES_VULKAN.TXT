@@ -472,3 +472,8 @@ and then use a buffer copy command to move the staging buffer's data into the se
 
 The buffer copy command requires a specific queue family: VK_QUEUE_TRANSFER_BIT
 However, any queue family with the eGraphics or eCompute flag already implicitly supports VK_QUEUE_TRANSFER_BIT, so we don't need to explicitly list it within our vk::QueueFlags requiredQueues object.
+
+
+
+
+See https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/02_Staging_buffer.html#_conclusion for some handy info about allocation buffers -- might come in handy later.
