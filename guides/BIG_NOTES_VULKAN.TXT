@@ -380,3 +380,95 @@ VertexOutput vertMain(uint vid: SV_VertexID)
     return output;
 }
 
+
+// Old code: Now replaced by a general abstracted buffer create (createBuffer())
+    void createVertexBuffer()
+    {
+        // You should know this by now, but I'm just regurgitating it.
+        // A buffer is a chunk of memory, which starts off empty, but gets populated by some arbitrary data. We're making a buffer here to store vertex data, and the reason we're allocating buffer memory ourselves here is because it isn't automatic.
+            // We are responsible for memory management, including buffers.
+
+        vk::BufferCreateInfo bufferInfo {
+            .size        = sizeof( vertices[0] ) * vertices.size(), // .size sets the buffer's reserved memory in bytes: gets the size of a single vertex in bytes, and multiply it by the amount of vertices in the container.
+            .usage       = vk::BufferUsageFlagBits::eVertexBuffer,  // .usage specifies which purpose the data inside of the buffer will be used for -- you can specify multiple purposes with bitwise OR.
+            .sharingMode = vk::SharingMode::eExclusive              // similarily with images inside of the swap chain, buffers can be owned by an exclusive queue family, or concurrently be owned by multiple queue families. We're only using the eGraphics queue, so it's exclusive.
+        };      // Note: we are NOT assigning the queue family here, we're just saying it'll be exclusive/owned by a single queue.
+            // There's also a .flags member, which is used to configure sparse buffer memory. We're not needing it right now, so we're leaving it as be, defaulted to 0.
+
+        // and similiarily with a bunch of other constructors for Vulkan objects, give the device and the information we just specified above (buffer info) to actually create a vertex buffer.
+        vertexBuffer = vk::raii::Buffer( logicalDevice, bufferInfo );
+            // an IMPORTANT notice: for GPU buffers, you NEED to explicitly allocate memory towards it, unlike with CPU's commandPool + commandBuffers -- it is automatic after object creation.
+            // right now, all we have is a handle to a vertexBuffer which information of what is supposed to be inside of it: we need to actually allocate the memory inside the GPU.
+
+        // The first step to ACTUALLY allocate memory inside the GPU is to get the memory requirements of the buffer. (REMEMBER: THIS IS ONLY NEEDED FOR GPU BUFFERS)
+        // struct vk::MemoryRequirements contains three member variables:
+            // .size: the size of the required memory in bytes (it MAY differ from bufferInfo.size)
+            // .alignment: the offset in bytes from where the buffer actually begins in the allocated region of memory (depends on bufferInfo's .usage and .flags)
+                //        this does NOT mean it shrinks the buffer memory size to "pad", it just shifts the address by X bytes to then begin the buffer itself at that shifted address
+            // .memoryTypeBits: the bit field of memory types that are suitable for the buffer -- this is NOT specified by .usage and isn't manually set, vulkan sets this automatically
+                // graphics card themselves offer different types of memory to allocate from, and each type of memory varies in terms of allowed operations and performance characteristics, and it's up to us to find the right memory type.
+        vk::MemoryRequirements memoryRequirements = vertexBuffer.getMemoryRequirements();
+        // Then properly fill out the Info struct with whatever requirements.
+        vk::MemoryAllocateInfo memoryAllocateInfo {
+            .allocationSize  = memoryRequirements.size, // the byte size to actually allocate for our buffer
+            .memoryTypeIndex = findGPUBufferMemoryType( memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent )
+                // for the first parameter of findGPUBufferMemoryType(), we're just passing the basic buffer memory requirements (NOT including the special properties we want, which is param2) to find the barebones support for this buffer.
+                // the second param is the special properties we require of the memory type -- we want to map the memory type to the CPU for access to our vertices, hence vk::MemoryPropertyFlagBits::eHostVisible
+        };
+
+        // Then the second step is to construct vk::raii::DeviceMemory to actually allocate the memory within the GPU!
+        // at this point, we've allocated memory onto the GPU, but the vertexBuffer object isn’t using it yet, hence vk::raii::Buffer::bindBufferMemory
+        vertexBufferMemory = vk::raii::DeviceMemory( logicalDevice, memoryAllocateInfo );
+        // first parameter specifies the memory handle to 'bind' the buffer to -- where this buffer's data exists.
+        // second parameter is the offset within this region of memory (just keep it zero) -- if the offset is non-zero, then it is required to be divisible by memRequirements.alignment
+        vertexBuffer.bindMemory( *vertexBufferMemory, 0 ); // Without this, vertexBuffer is NOT referencing ANY memory, and thus won't be useful.
+
+        // a pointer to our vertex buffer's memory (left of .mapMemory) -- we need to do this to actually grab ahold of the vertex data, otherwise it's inaccessible.
+        // first parameter is the offset (here, zero -- we want the whole thing), and the second parameter is the byte size of the region (within vertexBufferMemory) we want to grab ahold of (here, size of the entire butter -- we want the whole thing)
+        // think of it as a rectangular window: we start at the first point (offset 0, first param) of the rectangle, and cover the entire area of the rectangle (.size of the buffer, second param)
+        void* data = vertexBufferMemory.mapMemory( 0, bufferInfo.size ); // this begins the access of vertexBufferMemory within the CPU
+        // memcpy copies a block of memory from source (2nd param) to destination (1st param)
+            // the exact number of bytes to copy is specified by the third param (so we're grabbing the entirety of the buffer -- there is no byte offset, copy from the start of the buffer)
+        memcpy( data, vertices.data(), bufferInfo.size );
+            // so all this does is store the vertices.data() inside vertexBufferMemory through the void* data pointer.
+        vertexBufferMemory.unmapMemory(); // this ends the access of vertexBufferMemory within the CPU
+            // an analogy for mapMemory and unmapMemory (aside from other similar functions like beginRendering + endRendering) is like a treasure chest.
+            // once we mapMemory, the treasure chest is open and we can access the contents of the chest within CPU memory.
+            // once we unmapMemory, the treasure chest is sealed (but the contents itself are still within the chest, we just can't open the chest), preventing us from accessing the contents of the chest within CPU memory.
+                // this also means that the void* data pointer is now invalid and pointing to garbage -- DO NOT use data after this point
+
+
+    }
+
+
+Explanation for data transfering with GPU buffers
+
+        // a pointer to our vertex buffer's memory (left of .mapMemory) -- we need to do this to actually grab ahold of the vertex data, otherwise it's inaccessible.
+        // first parameter is the offset (here, zero -- we want the whole thing), and the second parameter is the byte size of the region (within vertexBufferMemory) we want to grab ahold of (here, size of the entire butter -- we want the whole thing)
+        // think of it as a rectangular window: we start at the first point (offset 0, first param) of the rectangle, and cover the entire area of the rectangle (.size of the buffer, second param)
+        void* data = vertexBufferMemory.mapMemory( 0, vertexBufferSize ); // this begins the access of vertexBufferMemory within the CPU
+        // memcpy copies a block of memory from source (2nd param) to destination (1st param)
+            // the exact number of bytes to copy is specified by the third param (so we're grabbing the entirety of the buffer -- there is no byte offset, copy from the start of the buffer)
+        memcpy( data, vertices.data(), vertexBufferSize );
+            // so all this does is store the vertices.data() inside vertexBufferMemory through the void* data pointer.
+        vertexBufferMemory.unmapMemory(); // this ends the access of vertexBufferMemory within the CPU
+            // an analogy for mapMemory and unmapMemory (aside from other similar functions like beginRendering + endRendering) is like a treasure chest.
+            // once we mapMemory, the treasure chest is open and we can access the contents of the chest within CPU memory.
+            // once we unmapMemory, the treasure chest is sealed (but the contents itself are still within the chest, we just can't open the chest), preventing us from accessing the contents of the chest within CPU memory.
+                // this also means that the void* data pointer is now invalid and pointing to garbage -- DO NOT use data after this point
+
+// We're changing the old vertexBuffer create function to an abstracted function + then using a STAGING BUFFER
+
+The current vertex buffer we have (the one thats created from the function above) works,
+but the memory type that us to access it from the CPU may not be the most optimal memory type for the graphics card to read data itself.
+The most optimal memory has the VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT flag, and the memory with this flag enabled USUALLY doesn't allow the data to be accessed by the CPU.
+
+So, we create TWO vertex buffers:
+    1. something called a "Staging Buffer" that utilizes a memory type that allows the CPU to access its memory/data from within the GPU;
+    2. the buffer that houses the data with a memory type that uses the most optimal property flag to allow the GPU to read from this optimized buffer WITHOUT using a slower memory type that'll allow CPU communication.
+The way this works is we assign the staging buffer whatever data we want the GPU to store from the CPU,
+and then use a buffer copy command to move the staging buffer's data into the second, optimized buffer -- staging buffer is then destroyed after sending its contents to the optimized buffer.
+    Essentially, a staging buffer is a mule.
+
+The buffer copy command requires a specific queue family: VK_QUEUE_TRANSFER_BIT
+However, any queue family with the eGraphics or eCompute flag already implicitly supports VK_QUEUE_TRANSFER_BIT, so we don't need to explicitly list it within our vk::QueueFlags requiredQueues object.

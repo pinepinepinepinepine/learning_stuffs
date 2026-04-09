@@ -247,7 +247,7 @@ class HelloTriangleApplication
             .pWaitDstStageMask    = &waitDestinationStageMask, // what stages of the pipeline where we need to wait for.
                 // We want to wait for writing colours to the image before we submit it, so we specify to to wait during the color attachment stage which is responsible for colour.
                 // This means that the vertex shader and such can execute upon other images while this image is not available yet for submission.
-            .commandBufferCount   = 1, // the number of command buffers we want to execute.
+            .commandBufferCount   = 1, // the number of command buffers we want to execute (create).
             .pCommandBuffers      = &*commandBuffers[wait_frameIndex], // the command buffer itself.
             .signalSemaphoreCount = 1, // the number of Semaphores to signal whenever the command buffer(s) specified above finish executing
             .pSignalSemaphores    = &*renderFinishedSemaphore[wait_frameIndex] // the semaphores themselves to signal.
@@ -1079,6 +1079,7 @@ class HelloTriangleApplication
     }
 
 
+    // P.S: Command Pools/Buffers ARE allocated in the GPU's memory (not CPU), BUT we don't have to allocate its memory ourselves (unlike with regular buffers) because Vulkan internally manages command buffer memory.
     void createCommandPool()
     {
         vk::CommandPoolCreateInfo commandPoolInfo{
@@ -1240,23 +1241,26 @@ class HelloTriangleApplication
         commandBuffers[wait_frameIndex].pipelineBarrier2( dependency_info );
     }
 
-    void createVertexBuffer()
+
+    // Abstracted GPU buffer creation function -- see big_note's original createVertexBuffer() for the original.
+    // first param (IN) sets the buffer's reserved memory in bytes; second param (IN) describes what this buffer'll be used for; third param (IN) specifies the memory properties we want;fourth param (OUT) is the buffer handle; fifth param (OUT) is the allocated memory itself which the buffer handle references for data storage.
+    void createGPUBuffer( vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::raii::Buffer& buffer, vk::raii::DeviceMemory& bufferMemory )
     {
         // You should know this by now, but I'm just regurgitating it.
-        // A buffer is a chunk of memory, which starts off empty, but gets populated by some arbitrary data. We're making a buffer here to store vertex data, and the reason we're allocating buffer memory ourselves here is because it isn't automatic.
+        // A buffer is a chunk of memory, which starts off empty, but gets populated by some type of data. We're making a buffer here to store vertex data (primarily, this is now abstracted), and the reason we're allocating buffer memory ourselves here is because it isn't automatic.
             // We are responsible for memory management, including buffers.
-
+        // Note for .sharingMode: we are NOT assigning the queue family here, we're just saying it'll be exclusive/owned by a single queue.
+        // There's also a .flags member, which is used to configure sparse buffer memory. We're not needing it right now, so we're leaving it as be, defaulted to 0.
         vk::BufferCreateInfo bufferInfo {
-            .size        = sizeof( vertices[0] ) * vertices.size(), // .size sets the buffer's reserved memory in bytes: gets the size of a single vertex in bytes, and multiply it by the amount of vertices in the container.
-            .usage       = vk::BufferUsageFlagBits::eVertexBuffer,  // .usage specifies which purpose the data inside of the buffer will be used for -- you can specify multiple purposes with bitwise OR.
-            .sharingMode = vk::SharingMode::eExclusive              // similarily with images inside of the swap chain, buffers can be owned by an exclusive queue family, or concurrently be owned by multiple queue families. We're only using the eGraphics queue, so it's exclusive.
-        };      // Note: we are NOT assigning the queue family here, we're just saying it'll be exclusive/owned by a single queue.
-            // There's also a .flags member, which is used to configure sparse buffer memory. We're not needing it right now, so we're leaving it as be, defaulted to 0.
+            .size = size, // .size sets the buffer's reserved memory in bytes: gets the size of a single data type in bytes, and multiply it by the amount of individual data types in the container.
+            .usage = usage, // .usage specifies which purpose the data inside of the buffer will be used for -- you can specify multiple purposes with bitwise OR.
+            .sharingMode = vk::SharingMode::eExclusive  // similarily with images inside of the swap chain, buffers can be owned by an exclusive queue family, or concurrently be owned by multiple queue families. We're only using the eGraphics queue, so it's exclusive.
+        };
 
         // and similiarily with a bunch of other constructors for Vulkan objects, give the device and the information we just specified above (buffer info) to actually create a vertex buffer.
-        vertexBuffer = vk::raii::Buffer( logicalDevice, bufferInfo );
-            // an IMPORTANT notice: for GPU buffers, you NEED to explicitly allocate memory towards it, unlike with CPU's commandPool + commandBuffers -- it is automatic after object creation.
-            // right now, all we have is a handle to a vertexBuffer which information of what is supposed to be inside of it: we need to actually allocate the memory inside the GPU.
+        // an IMPORTANT notice: for GPU buffers, you NEED to explicitly allocate memory towards it, unlike with CPU's commandPool + commandBuffers -- it is automatic after object creation.
+        // right now, all we have is a handle to a vertexBuffer which information of what is supposed to be inside of it: we need to actually allocate the memory inside the GPU.
+        buffer = vk::raii::Buffer( logicalDevice, bufferInfo );
 
         // The first step to ACTUALLY allocate memory inside the GPU is to get the memory requirements of the buffer. (REMEMBER: THIS IS ONLY NEEDED FOR GPU BUFFERS)
         // struct vk::MemoryRequirements contains three member variables:
@@ -1265,42 +1269,112 @@ class HelloTriangleApplication
                 //        this does NOT mean it shrinks the buffer memory size to "pad", it just shifts the address by X bytes to then begin the buffer itself at that shifted address
             // .memoryTypeBits: the bit field of memory types that are suitable for the buffer -- this is NOT specified by .usage and isn't manually set, vulkan sets this automatically
                 // graphics card themselves offer different types of memory to allocate from, and each type of memory varies in terms of allowed operations and performance characteristics, and it's up to us to find the right memory type.
-        vk::MemoryRequirements memoryRequirements = vertexBuffer.getMemoryRequirements();
-        // Then properly fill out the Info struct with whatever requirements.
-        vk::MemoryAllocateInfo memoryAllocateInfo {
+        vk::MemoryRequirements memoryRequirements = buffer.getMemoryRequirements();
+        vk::MemoryAllocateInfo memoryAllocateInfo { // Then properly fill out the Info struct with whatever requirements.
             .allocationSize  = memoryRequirements.size, // the byte size to actually allocate for our buffer
-            .memoryTypeIndex = findGPUBufferMemoryType( memoryRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent )
+            .memoryTypeIndex = findGPUBufferMemoryType( memoryRequirements.memoryTypeBits, properties )
                 // for the first parameter of findGPUBufferMemoryType(), we're just passing the basic buffer memory requirements (NOT including the special properties we want, which is param2) to find the barebones support for this buffer.
                 // the second param is the special properties we require of the memory type -- we want to map the memory type to the CPU for access to our vertices, hence vk::MemoryPropertyFlagBits::eHostVisible
         };
 
-        // Then the second step is to construct vk::raii::DeviceMemory to actually allocate the memory within the GPU!
-        // at this point, we've allocated memory onto the GPU, but the vertexBuffer object isn’t using it yet, hence vk::raii::Buffer::bindBufferMemory
-        vertexBufferMemory = vk::raii::DeviceMemory( logicalDevice, memoryAllocateInfo );
+        // Then the second step is to construct vk::raii::DeviceMemory to actually allocate the memory within the GPU based on whatever creation info!
+        // after this line executes, we've allocated memory onto the GPU, but the buffer object isn’t using it yet, hence vk::raii::Buffer::bind(Buffer)Memory
+        bufferMemory = vk::raii::DeviceMemory( logicalDevice, memoryAllocateInfo );
         // first parameter specifies the memory handle to 'bind' the buffer to -- where this buffer's data exists.
         // second parameter is the offset within this region of memory (just keep it zero) -- if the offset is non-zero, then it is required to be divisible by memRequirements.alignment
-        vertexBuffer.bindMemory( *vertexBufferMemory, 0 ); // Without this, vertexBuffer is NOT referencing ANY memory, and thus won't be useful.
-
-        // a pointer to our vertex buffer's memory (left of .mapMemory) -- we need to do this to actually grab ahold of the vertex data, otherwise it's inaccessible.
-        // first parameter is the offset (here, zero -- we want the whole thing), and the second parameter is the byte size of the region (within vertexBufferMemory) we want to grab ahold of (here, size of the entire butter -- we want the whole thing)
-        // think of it as a rectangular window: we start at the first point (offset 0, first param) of the rectangle, and cover the entire area of the rectangle (.size of the buffer, second param)
-        void* data = vertexBufferMemory.mapMemory( 0, bufferInfo.size ); // this begins the access of vertexBufferMemory within the CPU
-        // memcpy copies a block of memory from source (2nd param) to destination (1st param)
-            // the exact number of bytes to copy is specified by the third param (so we're grabbing the entirety of the buffer -- there is no byte offset, copy from the start of the buffer)
-        memcpy( data, vertices.data(), bufferInfo.size );
-            // so all this does is store the vertices.data() inside vertexBufferMemory through the void* data pointer.
-        vertexBufferMemory.unmapMemory(); // this ends the access of vertexBufferMemory within the CPU
-            // an analogy for mapMemory and unmapMemory (aside from other similar functions like beginRendering + endRendering) is like a treasure chest.
-            // once we mapMemory, the treasure chest is open and we can access the contents of the chest within CPU memory.
-            // once we unmapMemory, the treasure chest is sealed (but the contents itself are still within the chest, we just can't open the chest), preventing us from accessing the contents of the chest within CPU memory.
-                // this also means that the void* data pointer is now invalid and pointing to garbage -- DO NOT use data after this point
-
+        buffer.bindMemory( *bufferMemory, 0 ); // Without this, the buffer is NOT referencing ANY memory, and thus won't be useful -- the buffer object w/o a referenced memory region is pointless.
 
     }
 
-    // finds the right type of memory to use whenever allocating memory into GPU buffers.
-        // typeFilter is a bitmask of memory types that are suitable/requested.
 
+    void createVertexBuffer()
+    {
+        vk::DeviceSize vertexBufferSize = sizeof(vertices[0]) * vertices.size();
+
+        // Create the staging buffer (which uses a memory type that allows its GPU data to be accessible from the CPU) to move/mule our CPU data to the second, optimized buffer (which doesn't allow talking to the CPU) -- see BIG_NOTES.
+        vk::BufferCreateInfo stagingInfo {
+            .size = vertexBufferSize,
+            .usage = vk::BufferUsageFlagBits::eTransferSrc, // We're indicating this buffer (source) is used solely to transfer its contents into another buffer (destination).
+            .sharingMode = vk::SharingMode::eExclusive
+        };
+        vk::raii::Buffer stagingBuffer( logicalDevice, stagingInfo );
+
+        // the staging buffer's actual memory requirements (the create info: the number of bytes to allocate in GPU memory, and the GPU memory type to use)
+        vk::MemoryRequirements memRequirementsStaging = stagingBuffer.getMemoryRequirements();
+        vk::MemoryAllocateInfo memoryAllocateInfoStaging {
+            .allocationSize = memRequirementsStaging.size,
+            .memoryTypeIndex = findGPUBufferMemoryType( memRequirementsStaging.memoryTypeBits, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent )
+        };
+        vk::raii::DeviceMemory stagingBufferMemory(logicalDevice, memoryAllocateInfoStaging); // actually allocate the bytes (specified by memoryAllocateInfoStaging) inside GPU memory
+
+        // bind the stagingBuffer to reference this region of memory (stagingBufferMemory)
+        stagingBuffer.bindMemory( stagingBufferMemory, 0 );
+
+        // then store the vertex data inside the staging buffer's region of memory (stagingBufferMemory)
+        void* dataStaging = stagingBufferMemory.mapMemory(0, stagingInfo.size); // mapMemory begins the access of stagingBufferMemory (which is allocated GPU memory) from within the CPU
+        memcpy( dataStaging, vertices.data(), stagingInfo.size ); // move the vertices.data() into stagingBufferMemory
+        stagingBufferMemory.unmapMemory(); // unmapMemory ends the access of stagingBufferMemory from within the CPU -- the dataStaging pointer is now invalid.
+
+        // unrelated: you could make the staging buffer with "createGPUBuffer", but for the sake of learning and cementing this into my head: i'm just being explicit and repeating -- it's the same thing but just using local variables as the OUT params + different flags
+        outputFile << get_current_time() << " | Created the Staging Buffer for the Vertex Buffer" << std::endl;
+
+        createGPUBuffer(
+            vertexBufferSize,
+            vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst, // We're using this buffer to be the VertexBuffer, and to receive data
+            vk::MemoryPropertyFlagBits::eDeviceLocal, // a memory type that contains the eDeviceLocal flag will always be fastest, but we won't be able to access its data from the CPU.
+            vertexBuffer,
+            vertexBufferMemory
+        );
+
+        outputFile << get_current_time() << " | Created the Vertex Buffer" << std::endl;
+
+        // finally copy the contents of the source buffer (stagingBuffer, param1) into the destination bugger (vertexBuffer, param2)
+            // param3 is just how many bytes to copy over -- we're sending everything, hence pass the byte size of the entire staging buffer
+        copyBuffer( stagingBuffer, vertexBuffer, stagingInfo.size );
+
+        outputFile << get_current_time() << " | Copied the contents of the Staging Buffer to the Vertex Buffer" << std::endl;
+    }
+
+
+    void copyBuffer( vk::raii::Buffer & srcBuffer, vk::raii::Buffer & dstBuffer, vk::DeviceSize size )
+    {
+        // Memory transfer operations are executed using command buffers, similarily to drawing commands. So, first step is to make a (temporary) command buffer
+            // It's probably a good idea to make a seperate global command pool for short-lived, temporary command buffers as we could apply memory allocation optimizations
+            // If making a command pool for that case, use the VK_COMMAND_POOL_CREATE_TRANSIENT_BIT flag for its creation -- we're lazy, so this works for now.
+        vk::CommandBufferAllocateInfo allocInfo {
+            .commandPool = commandPool,
+                // reminder: command buffers allocate memory from the command pool dynamically by Vulkan internally -- we don't have to deal with commandPool/Buffer memory ourselves.
+                // and it's ALSO why we can just use the drawing command pool (that is meant for drawing command buffers) for this temporary command buffer -- the pool will handle all the buffers it allocates.
+            .level = vk::CommandBufferLevel::ePrimary, // see the other .level comment -- this is a primary command buffer, it'll submit directly to the queue for execution.
+            .commandBufferCount = 1
+        };
+
+        // ctrl-f std::move within BIG_NOTES to see what this line does
+        // TLDR, though, is we don't want a reference, we want the actual commandBuffer, so we use std::move to return an rvalue (raw data, no address) rather than a reference to avoid dangling.
+        // in the BIG_NOTE comment, vk::raii::CommandBuffers is equivalent to allocateCommandBuffers() -- both return a CONTAINER of command buffers, not an individual buffer, hence .front()
+        vk::raii::CommandBuffer commandCopyBuffer = std::move( logicalDevice.allocateCommandBuffers( allocInfo ).front() );
+
+        // while not necessary, it's good practice to tell the drive our intent with VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT... Anyways, all this does is begin the recording of the command buffer.
+        commandCopyBuffer.begin( vk::CommandBufferBeginInfo { .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit } );
+
+        // copyBuffer just copies the contents of the Source Buffer (param1) into the Destination Buffer (param2) up to whatever bytes (param3)
+        // copyBuffer's third param takes a vk::BufferCopy object, the first two members of BufferCopy struct is .srcOffset and .dstOffset (we're not offsetting what byte to start from, hence both 0), and the .size
+        commandCopyBuffer.copyBuffer( srcBuffer, dstBuffer, vk::BufferCopy( 0, 0, size ) );
+
+        // end the recording of the command buffer.
+        commandCopyBuffer.end();
+
+        // send the command buffer into the graphics queue to be actually executed, and thus to actually copy the contents over.
+        graphicsQueue.submit( vk::SubmitInfo{ .commandBufferCount = 1, .pCommandBuffers = &*commandCopyBuffer }, nullptr );
+
+        // instead of passing nullptr as submitInfo's fence, might be a good idea to actually use fence, but whatever, we're lazy,
+        // obviously a fence is better because it'll allow synchronization, but anyway lets just wait until the graphic queue is empty altogether because. we. are. lazy.
+        graphicsQueue.waitIdle();
+    }
+
+
+    // finds the right type of memory to use whenever allocating memory into GPU buffers.
+        // typeFilter is a bitmask of basic memory types that are suitable, whereas properties are bit flags that allow the memory to do special stuff, like accessible from CPU, or allows transferring data.
     uint32_t findGPUBufferMemoryType( uint32_t typeFilter, vk::MemoryPropertyFlags properties )
     {
         // query this GPU for its available types of memory to choose from whenever allocating GPU buffers
