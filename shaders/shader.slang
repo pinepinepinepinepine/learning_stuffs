@@ -1,13 +1,23 @@
+struct UniformBuffer {
+    float4x4 model;
+    float4x4 view;
+    float4x4 proj;
+};
+ConstantBuffer<UniformBuffer> ubo;
+// We’re going to update the model, view and projection matrices every frame to make the rectangle from the previous chapter spin around in 3D.
+// SEE BIG_NOTES_MATH.
+
 // a 1D vector is just a point on a line (only one dimension, X or Y)
 // a 2D vector has X and Y axis positions
 // a 3D vector has X and Y axis positions, as well as Z (Depth)
 // a 4D vector has X and Y axis positions, as well as Z (Depth), but also W for "HOMOGENOUS/PERSPECTIVE TRANSFORMATIONS"
+    // float4 means it's a 4-component (4D) vertex. z is depth (we're doing a 2D image, so 0.0),  w is "PERSPECTIVE TRANSFORMATION" (USED FOR PERSPECTIVE CALCULATION)
+    // (you know how when you're far away from an object, it's smaller? yeah. that thing. essentially it scales the size accordingly depending on distance to give the same illusion. future problem.)... keep it 1.0.
 
 struct VertexInput {
     float2 inPosition;
     float3 inColor;
 };
-
 
 struct VertexOutput {
     float3 color; // float3, in this context, isn't xyz position, it's just RGB.
@@ -20,9 +30,9 @@ struct VertexOutput {
 VertexOutput vertMain( VertexInput input )
 {
     VertexOutput output;
-    output.sv_position = float4( input.inPosition, 0.0, 1.0 );
-    // float4 means it's a 4-component (4D) vertex. z is depth (we're doing a 2D image, so 0.0),  w is "PERSPECTIVE TRANSFORMATION" (USED FOR PERSPECTIVE CALCULATION)
-    // (you know how when you're far away from an object, it's smaller? yeah. that thing. essentially it scales the size accordingly depending on distance to give the same illusion. future problem.)... keep it 1.0.
+
+    // SEE BIG_NOTES_MATH FOR A MUCH NEEDED ELABORATION. mul() just multiplies two matrices.
+    output.sv_position = mul( ubo.proj, mul( ubo.view, mul( ubo.model, float4(input.inPosition, 0.0, 1.0) ) ) );
 
     output.color = input.inColor;
     return output;

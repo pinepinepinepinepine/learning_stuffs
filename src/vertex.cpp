@@ -1,5 +1,14 @@
 #include "includes.hpp"
 
+
+// transform matrices housed inside a uniform buffer -- see BIG_NOTES for a bit of an elaboration
+struct UniformBufferObject {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
+};
+
+
 struct Vertex
 {
     glm::vec2 pos; // position of the vertex (duh)

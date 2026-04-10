@@ -1,0 +1,201 @@
+
+Transforming (or moving) vertices works by multiplying the vertex by a matrix, and the matrix defines where it'll move.
+https://www.opengl-tutorial.org/beginners-tutorials/tutorial-3-matrices/#homogeneous-coordinates
+
+As an IMPORTANT preface:
+When we are CALCULATING a vertex, we are operating (calculating it) in a simulated 3D/4D space; only AFTER our calculations do we convert it to a 2D image.
+    get the idea out about having to relate this to 2D immediately when we introduce Z (or W) because we aren't:
+        we calculate it FULLY in a 3D or 4D "ENVIRONMENT" with math, and then after we're done our calculations, we get something that can be represented in 2D
+
+For instance, say we have a vertex with these coordinates:
+float4( input.inPosition, 0.0, 1.0 ) -- literally ripped from the old code
+    input.inPosition, lets say, is -0.5f, -0.5f
+So...
+( -0.5x, -0.5y, 0.0z, 1.0w )
+    X/Y/Z is obvious, but W is essentially the "Scale", it's formally called a "homogeneous coordinate"
+
+Our vertex is represented like this through a matrix (4x1):
+
+| -0.5 | = x
+| -0.5 | = y
+|  0.0 | = z
+|  1.0 | = w
+
+When we want to multiply a vertex, we multiply the transformation matrix (which will be 4x4 a matrix) by our vector (4x1) -- the ORDER MATTERS.
+
+| a  b  c  d |       | -0.5 |
+| e  f  g  h |   *   | -0.5 |
+| i  j  k  l |       |  0.0 |
+| m  n  o  p |       |  1.0 |
+
+Which computes to...
+
+|  -0.5a  +  -0.5b  +  0.0c  +  1.0d  |
+|  -0.5e  +  -0.5f  +  0.0g  +  1.0h  |
+|  -0.5i  +  -0.5j  +  0.0k  +  1.0l  |
+|  -0.5m  +  -0.5n  +  0.0o  +  1.0p  |
+
+
+This will result in a 4x1 matrix, which will be our transformed vertex.
+The transformed matrix (the 4x4 one) dictates how the vertex shifts.
+
+
+-----
+Translation matrices
+
+Translation matrices are a transformation matrix, but just a specific kind. An example of a translation matrix:
+| 1  0  0  X |
+| 0  1  0  Y |
+| 0  0  1  Z |
+| 0  0  0  1 |
+
+Where X, Y, and Z are the values you add to the their respective axis of the vertex.
+So lets say we want to shift out vertex +2X, +3Y, and +4X:
+
+| 1  0  0  2 |       | -0.5 |
+| 0  1  0  3 |   *   | -0.5 |
+| 0  0  1  4 |       |  0.0 |
+| 0  0  0  1 |       |  1.0 |
+
+Which computes to...
+
+| 1.5 |
+| 2.5 |
+| 4.0 |
+| 1.0 |
+
+So a vertex of (1.5x, 2.5y, 4.0z, and 1.0w)
+
+
+-----
+Identity matrices
+
+An identity matrix is a transformation matrix... but special because it doesn't do anything to the original vertex. An identity matrix is:
+
+| 1  0  0  0 |
+| 0  1  0  0 |
+| 0  0  1  0 |
+| 0  0  0  1 |
+
+Multiplying it by our vertex returns the exact same vertex:
+
+| -0.5 |
+| -0.5 |
+|  0.0 |
+|  1.0 |
+
+-----
+Scaling matrices
+
+Scaling matrices are a kind of transformation matrix. An example:
+
+| X  0  0  0 |
+| 0  Y  0  0 |
+| 0  0  Z  0 |
+| 0  0  0  1 |
+
+If you want to scale a vector by whatever value, change X/Y/Z, here we are scaling X by 2, Y by 3, and Z by 4.
+
+| 2  0  0  0 |        | -0.5 |
+| 0  3  0  0 |   *    | -0.5 |
+| 0  0  4  0 |        |  0.0 |
+| 0  0  0  1 |        |  1.0 |
+
+Which computes to...
+
+| -1.0 |
+| -1.5 |
+|  0.0 |
+|  1.0 |
+
+“scaling an axis” doesn't do much by itself, but it's handy to know.
+
+-----
+Rotating matrices
+https://www.brainvoyager.com/bv/doc/UsersGuide/CoordsAndTransforms/SpatialTransformationMatrices.html (The Rotation Matrix)
+
+There are complicated, but we have to rotate around a specific axis.
+in the following matrices, r is the number of radians to rotate by. (convert degrees to radians online)
+
+to rotate around the X axis:
+    CLOCKWISE:
+    | 1        0        0     0 |
+    | 0   cos(r)    sin(r)    0 |
+    | 0  -sin(r)    cos(r)    0 |
+    | 0        0        0     1 |
+
+    COUNTER-CLOCKWISE:
+    | 1        0        0     0 |
+    | 0   cos(r)   -sin(r)    0 |
+    | 0   sin(r)    cos(r)    0 |
+    | 0        0        0     1 |
+
+to rotate around the Y axis:
+    CLOCKWISE:
+    | cos(r)   0  -sin(r)     0 |
+    |      0   1        0     0 |
+    | sin(r)   0   cos(r)     0 |
+    |      0   0        0     1 |
+
+    COUNTERCLOCKWISE:
+    | cos(r)   0   sin(r)     0 |
+    |      0   1        0     0 |
+    |-sin(r)   0   cos(r)     0 |
+    |      0   0        0     1 |
+
+to rotate around the Z axis:
+    CLOCKWISE:
+    | cos(r)   sin(r)   0   0 |
+    |-sin(r)   cos(r)   0   0 |
+    |      0        0   1   0 |
+    |      0        0   0   1 |
+
+    COUNTER-CLOCKWISE:
+    | cos(r)  -sin(r)   0   0 |
+    | sin(r)   cos(r)   0   0 |
+    |      0        0   1   0 |
+    |      0        0   0   1 |
+
+
+----
+
+
+So now that we know the 3 basic ways to transform a matrix, we can combine these transformations. The standard order of operations is like this:
+
+TransformedVector = ( TranslationMatrix * ( RotationMatrix * ( ScaleMatrix * OriginalVector ) ) );
+    So scale the matrix first, then rotate it, and then translate (shift) it
+
+
+=======
+
+the MODEL transformation are the transformations that affect an INDIVIDUAL model
+the VIEW transformations are the transformations that affect the WORLD -- everything EXCEPT the PROJECTION.
+the PROJECTION transformation are the transformations that affect EVERY VERTEX to mimic perspective in a 3D space: field of view, depth, perspective
+    you transform ALL the vertices so it appears as if the camera moved, then the vertices' coordinates will be RELATIVE to the camera itself
+    projection is fucking confusing, but it makes it actually look 3D from 2D: https://www.opengl-tutorial.org/beginners-tutorials/tutorial-3-matrices/#the-projection-matrix
+
+So...
+the MODEL matrix answers where the object is.
+the VIEW matrix answers where the camera is.
+the PROJECTION matrix answers HOW to make the 3D scene into a 2D image
+
+MVP Matrix = ( projection * ( view * model ) )
+The MVP matrix (4x4) is then used to transform every vertex from MODEL SPACE into CLIP SPACE.
+
+so...
+             | -0.5 |
+MVP MATRIX * | -0.5 |
+             |  0.0 |
+             |  1.0 |
+
+and NOW our vertices are in CLIP SPACE.
+    ONE MORE FINAL STEP BEFORE BEING ABLE TO PLACE THEM IN OUR SCREEN.
+
+divide each X/Y/Z component in our matrix by the matrix's w (the homogeneous coordinate) (the w is the w received AFTER multiplying MVP matrix * vertex -- 4th component)
+MVP'd X  / w = X
+MVP'd Y  / w = Y
+MVP'd Z  / w = Z
+
+the resulting division makes these coordinates in NDC (Normalized Device Coordinates) -- a range of -1 to 1
+    if you have to convert the NDC to pixels (if vertex placement depends on pixels), then you'd first have to convert NDC to pixels.
+and NOW they can be placed in a 2D surface (so just use X and Y), where they'll render like it's 3D!

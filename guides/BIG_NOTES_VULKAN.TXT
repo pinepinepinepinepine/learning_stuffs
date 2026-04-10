@@ -491,3 +491,26 @@ The previous code for drawing vertices directly WITHOUT indices (now we use draw
             // Second: instanceCount - Instanced rendering (use 1 if we're not doing that)
             // Third: firstVertex - Used as an offset into the vertex buffer, defines the lowest value of SV_VertexId -- if it's above 0, we're skipping some vertices to not be shaded.
             // Fourth: firstInstance - Used as an offset for instanced rendering, defines the lowest value of SV_InstanceID -- if it's above 0, we're skipping some instances to not be shaded (we have only one instance, so...)
+
+
+It's also recommended to store multiple GPU buffers (including vertex, index) from a single allocated memory pool.
+Furthermore, it's recommended by driver devs to make a single general GPU buffer to house/store other GPU buffers (inc. vertex/index),
+and use offsets in commands like vkCmdBindVertexBuffers to differentiate the individual buffers within the general buffer by regions
+    We're not literally putting a buffer inside a buffer, but designating each region of the general buffer's allocated space to house another buffer, and using offset commands to specify what individual 'buffer' we want.
+
+
+
+A 'Resource Descriptor' is a way for shaders in the GPU pipeline to access whatever other resources in the GPU that it cant normally see, like GPU buffers or images.
+A 'Uniform Buffer' is a buffer in GPU memory that stores whatever data we want to give the shaders in the GPU pipeline -- it is not exclusive to contain only vertices, indices, etc
+    The resource descriptor and uniform buffer goes hand-in-hand: the uniform buffer houses the actual data, and the resource descriptor allows the GPU pipeline shader functions to access the data in the uniform buffer.
+
+
+So, first step is to make a uniform buffer that contains transformation matrices (we're making 3D stuff now) and have the vertex shader access them through the resource descriptor.
+
+The usage of a resource descriptor consists of three parts:
+    1. Specify a 'descriptor set layout' during pipeline creation
+    2. Allocate a 'descriptor set' from a descriptor pool
+    3. Bind the 'descriptor' set during rendering
+
+A 'descriptor set layout' specifies the types of resources that'll be accessed by the shaders (in the pipeline) (similarily w/ how we specify what color formats will be used for the rendering)
+A 'descriptor set' specifies the actual uniform buffer or image resources that'll be bound to the descriptors (where the data is housed) (similarily w/ how the image views gets binded to the render's attachments)
