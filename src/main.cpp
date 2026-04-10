@@ -1186,11 +1186,16 @@ class HelloTriangleApplication
                 // we can use *vertexBuffer as our second parameter w/ bindVertexBuffers to read the original vertex data -- we don't pass the memory itself (we pass the buffer) because it's how bindVertexBuffer is set up to read it (the buffer is referencing the memory anyway, so it's no problem)
 
         // this tells the command buffer where to read index data from (first parameter now instead of second? ok.)
+        // the way this works is since we already binded the vertexBuffer to this commandBuffer, it associates the indices in the declaration order of the vertices, so indexBuffer value 1 is the second declared vertexBuffer
+        // therefore, our original indices struct is executed sequentially ( 0, 1, 2, 2, 3, 0 ), and each index value within that sequence corresponds to our vertices struct (where first declared vertex is index value 0)
         commandBuffers[wait_frameIndex].bindIndexBuffer( *indexBuffer, 0, vk::IndexType::eUint16 );
 
         // see BIG_NOTES for the old version which draws vertices directly w/o indices, and for a detailed explanation.
-        commandBuffers[wait_frameIndex].drawIndexed( indices.size(), 1, 0, 0, 0 );
+        commandBuffers[wait_frameIndex].drawIndexed( indices.size(), 1, 0, 0, 0 ); // a reminder: it draws it all at once
         // TODO https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/03_Index_buffer.html#_using_an_index_buffer, add comments, but dude like... just use common sense and hover over drawIndexed(), you know by now how shit works.
+            // i cant be fucked its just the same thing as .draw() in BIG_NOTES.
+
+        outputFile << get_current_time() << " | Drew a frame" << std::endl;
 
         // end the rendering here.
         commandBuffers[wait_frameIndex].endRendering();
