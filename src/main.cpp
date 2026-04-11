@@ -86,6 +86,12 @@ class HelloTriangleApplication
     // A 'descriptor set layout' specifies the types of resources that'll be accessed by the shaders (in the pipeline)
     vk::raii::DescriptorSetLayout descriptorSetLayout = nullptr;
 
+    // Descriptor sets can't be directly created. Similarily w/ Command Buffers, they need to be allocated from a pool.
+    vk::raii::DescriptorPool descriptorPool = nullptr;
+
+    // A descriptor set references the descriptor set layout's resources, which in turn allows communications from a uniform buffer to a shader in the pipeline.
+    std::vector<vk::raii::DescriptorSet> descriptorSets;
+
     // At this point, we're required to make a pipeline layout but won't be using it until a few chapter, so we're making it empty.
     vk::raii::PipelineLayout pipelineLayout = nullptr;
     vk::raii::Pipeline graphicsPipeline = nullptr; // the pipeline ITSELF!
@@ -184,7 +190,11 @@ class HelloTriangleApplication
 
         createIndexBuffer(); // see function for elaboration
 
-        createUniformBuffers();
+        createUniformBuffers(); // see function for elaboration
+
+        createDescriptorPool();
+
+        createDescriptorSets();
 
         createCommandBuffers(); // see function for elaboration
 
@@ -242,6 +252,11 @@ class HelloTriangleApplication
             throw std::runtime_error("failed to acquire swap chain image!");
         }
 
+        // this just updates the uniformBuffer's transformation matrices so that we can actually make the object spin.
+        // remember the vertex shader references the uniform buffer directly with the descriptor layout, so we don't need to change anything to drawFrame -- the vertex shader function in shader.slang handles its position
+            // GOD THANK FUCK THIS IS INTENDED TO BE PLACED BEFORE recordCommandBuffer() -- i could feel a FUCKING MIGRAINE trying to make sense of my IDIOCY. WHY THE FUCK WOULD I BE RECORDING A UPDATING THE BUFFER AFTER RECORDING IT? for the NEXT FRAME? ???
+        updateUniformBuffer(wait_frameIndex);
+
         // UPDATE: if result is eErrorOutOfDateKHR (it CANNOT OCCUR RIGHT NOW BECAUSE WE DIDN'T DEFINE IT AND SUBSEQUENTLY CATCH IT -- RIGHT NOW IT'LL CRASH THE PROGRAM), we MUST set this to unsignaled AFTER we've checked for eErrorOutOfDateKHR
         // because OTHERWISE the return (from above) causes the next drawFrame to wait till time-expiry due to drawFrame being unsignaled
         logicalDevice.resetFences( *drawFence[wait_frameIndex] ); // Signal the fence back to unsignaled so that the next iteration can run as expected (OTHERWISE, drawFence is set to signaled, causing waitForFences to never wait)
@@ -257,11 +272,6 @@ class HelloTriangleApplication
             // and still does after the next chapter.
 
         vk::PipelineStageFlags waitDestinationStageMask( vk::PipelineStageFlagBits::eColorAttachmentOutput );
-
-        // this just updates the uniformBuffer's transformation matrices so that we can actually make the object spin.
-        // remember the vertex shader references the uniform buffer directly with the descriptor layout, so we don't need to change anything to drawFrame -- the vertex shader function in shader.slang handles its position
-        updateUniformBuffer(wait_frameIndex);
-
 
         // the vk::SubmitInfo configures the queue submission and its synchronization through its members.
         const vk::SubmitInfo submitInfo {
@@ -852,7 +862,6 @@ class HelloTriangleApplication
     }
 
 
-    // WORK.
     void createDescriptorSetLayout()
     {
         // See big notes: Descriptor Set Layout Binding specifies what the descriptor binds to (we've only one uniform buffer) and what shader can reference it (vertex shader) -- essentially making an individual binding slot in our Descriptor Set Layout
@@ -873,6 +882,70 @@ class HelloTriangleApplication
         // As with a bunch of other Vulkan objects, use the create info and the device to actually create the vk::raii::DescriptorSetLayout object.
         descriptorSetLayout = vk::raii::DescriptorSetLayout( logicalDevice, layoutInfo );
     }
+
+    void createDescriptorPool()
+    {
+        // First parameter specifies the type of descriptors we want in this pool
+        // Second parameter specifies the number of descriptors we want in this pool.
+        vk::DescriptorPoolSize poolSize(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT);
+
+        vk::DescriptorPoolCreateInfo poolInfo {
+            .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, // Flags to give to the pool: eFreeDescriptorSet means we can "free" (delete) descriptors individually instead of having to free the whole pool. We don't use this, so you can also just leave this at 0, but whatever.
+            .maxSets = MAX_FRAMES_IN_FLIGHT, // the maximum number of descriptors that can be allocated from this pool
+            .poolSizeCount = 1, // the number of pool sizes we're using
+            .pPoolSizes = &poolSize // the pool size themselves
+        };
+
+        descriptorPool = vk::raii::DescriptorPool( logicalDevice, poolInfo );
+
+    }
+
+    void createDescriptorSets()
+    {
+        // Makes a vector of size MAX_FRAMES_IN_FLIGHT, where all the elements are a pointer of the same descriptorSetLayout
+        std::vector<vk::DescriptorSetLayout> layouts( MAX_FRAMES_IN_FLIGHT, *descriptorSetLayout );
+
+        vk::DescriptorSetAllocateInfo allocInfo {
+            .descriptorPool = descriptorPool, // Where the descriptor set will be allocated from
+            .descriptorSetCount = static_cast<uint32_t>( layouts.size() ), // the number of descriptor sets to create
+            .pSetLayouts = layouts.data() // what descriptor set layout each descriptor set will reference
+        };
+
+        descriptorSets.clear(); // same gimmick, inconsequential rn.
+
+        // Now each descriptor set will individually reference a single descriptor set layout -- the descriptor set does NOT reference the uniform buffer yet, the layout is simply stating what the set will contain
+        descriptorSets = logicalDevice.allocateDescriptorSets( allocInfo );
+
+        // The descriptors (resources) need to be actually created for every set, so iterate over the descriptor sets to populate them with actual resources/data (descriptors)
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            vk::DescriptorBufferInfo bufferInfo {
+                .buffer = uniformBuffers[i], // what uniform buffer will be referenced through this descriptor set
+                .offset = 0, // the beginning of the buffer in memory.
+                .range = sizeof(UniformBufferObject) // range is the byte region in memory: we want the whole uniform buffer, hence the byte size of a UniformBufferObject
+            };
+
+            vk::WriteDescriptorSet descriptorWrite {
+                .dstSet = descriptorSets[i], // the descriptor set we're updating
+                .dstBinding = 0, // the binding of the resource -- we set the uniform buffer to 0 through vk::DescriptorSetLayoutBinding::binding
+                .dstArrayElement = 0, // resources (descriptors) can be an array, so here we're specifying the first index in the array to update. we're not using an array, hence 0, aka first one.
+                .descriptorCount = 1, // how many descriptors (resource) to update.
+                .descriptorType = vk::DescriptorType::eUniformBuffer, // we're specifying the descriptor (resource) type again.
+                .pBufferInfo = &bufferInfo // the information of the descriptor (resource)'s buffer.
+            };
+            // The pBufferInfo field is used for descriptors that refer to buffer data,
+            // pImageInfo is used for descriptors that refer to image data,
+            // and pTexelBufferView is used for descriptors that refer to buffer views. Our descriptor is based on buffers, so we’re using pBufferInfo
+
+            // first param: describes what to update (so, we're updating the information above)
+            // second param is to copy discriptors to each other, which we're not doing.
+            // updateDescriptorSet now formally ties the descriptor (resource) to this descriptor set: in our case, the descriptor set is now referencing the uniform buffer.
+            logicalDevice.updateDescriptorSets( descriptorWrite, {} );
+
+        }
+
+    }
+
 
     void createGraphicsPipeline()
     {
@@ -963,7 +1036,8 @@ class HelloTriangleApplication
             .polygonMode             = vk::PolygonMode::eFill, // determines how fragments are generated for geometry (eFill = entire area of polygon w/ fragments; eLine = edges are drawn as lines (wireframe); ePoint = vertices are drawn as points)
                 // Any other polygon mode aside from eFill requires enabling a GPU feature (make sure to first query for it first!)
             .cullMode                = vk::CullModeFlagBits::eBack, // Determines what faces to cull: can cut out the front, back, both, or disable it entirely. (as a result, whatever facing triangles won't be shown)
-            .frontFace               = vk::FrontFace::eClockwise, // Specifies what vertex order is 'front facing': either clockwise or counter-clockwise (if a triangle is back-facing, it's likely behind something, and so not visible)
+            .frontFace               = vk::FrontFace::eCounterClockwise, // Specifies what vertex order is 'front facing': either clockwise or counter-clockwise (if a triangle is back-facing, it's likely behind something, and so not visible)
+                // Update with descriptors: https://docs.vulkan.org/tutorial/latest/05_Uniform_buffers/01_Descriptor_pool_and_sets.html#_using_descriptor_sets, bottom
             .depthBiasEnable         = vk::False, // The rasterizer can alter the depth values by either adding a constant, or biasing them based upon a fragment's slope in order to "skew" the depth test. This is sometimes used for shadowmapping.
             .lineWidth               = 1.0f // the thickness of the lines (1.0f = a line 1.0 pixel thick): the maximum width is depends on hardware, and having this value be above 1.0f requires enabling the wideLines gpu feature.
         };
@@ -1236,6 +1310,23 @@ class HelloTriangleApplication
         // therefore, our original indices struct is executed sequentially ( 0, 1, 2, 2, 3, 0 ), and each index value within that sequence corresponds to our vertices struct (where first declared vertex is index value 0)
         commandBuffers[wait_frameIndex].bindIndexBuffer( *indexBuffer, 0, vk::IndexType::eUint16 );
 
+        // commandBuffers[wait_frameIndex].bindDescriptorSets selects what descriptor set is used. In our case, this command buffer is saying
+        // "when accessing the resource (in our case, a uniform buffer) in the shader functions, use the descriptorSet at index [wait_frameIndex]"
+        // it's important to note: we're not necessarily "CHOOSING": when we BIND something to a pipeline, when we are referring to the resource (descriptor) in a shader function (for instance, the vertex shader, but it can be anywhere),
+        // and call "ubo.proj", we are IMPLICITLY accessing the binded resource/descriptor -- the shader function only calls upon the UBO.proj, and it's up to us here to specify what descriptor set that UBO.proj is referring to.
+        // for example: ubo.proj is provided from descriptorSets[wait_frameIndex], which houses the uniform buffer (and as a result can access .proj from it). if we don't bind the descriptor set, ubo.proj is reading invalid memory because we didn't bind descriptorSets[wait_frameIndex]'s resource/descriptor (where it's supposed to read from)
+        commandBuffers[wait_frameIndex].bindDescriptorSets(
+            vk::PipelineBindPoint::eGraphics, // what pipeline we're binding it to: we're using it in the graphics pipeline
+            pipelineLayout,
+            0,
+            *descriptorSets[wait_frameIndex], // the descriptor set that commandBuffers[wait_frameIndex] will use.
+            nullptr
+        );
+
+        // the gist with all these buffers (vertex, index, uniform) is that they provide what vertex, indices, and uniform values to use in the pipeline:
+        // when drawIndexed() executes below, the resources used to draw it were already bound (the vertex, index, and uniform values to use) to this command buffer, and as a result, drawIndexed() just uses those bound resources.
+            // drawIndexed() will utilize the bound data: the vertices, the indices, and the MVP transformations.
+
         // see BIG_NOTES for the old version which draws vertices directly w/o indices, and for a detailed explanation.
         commandBuffers[wait_frameIndex].drawIndexed( indices.size(), 1, 0, 0, 0 ); // a reminder: it draws it all at once
         // TODO https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/03_Index_buffer.html#_using_an_index_buffer, add comments, but dude like... just use common sense and hover over drawIndexed(), you know by now how shit works.
@@ -1302,7 +1393,7 @@ class HelloTriangleApplication
 
 
     // Abstracted GPU buffer creation function -- see big_note's original createVertexBuffer() for the original.
-    // first param (IN) sets the buffer's reserved memory in bytes; second param (IN) describes what this buffer'll be used for; third param (IN) specifies the memory properties we want;fourth param (OUT) is the buffer handle; fifth param (OUT) is the allocated memory itself which the buffer handle references for data storage.
+    // first param (IN) sets the buffer's reserved memory in bytes; second param (IN) describes what this buffer'll be used for; third param (IN) specifies the memory properties we want; fourth param (OUT) is the buffer handle; fifth param (OUT) is the allocated memory itself which the buffer handle references for data storage.
     void createGPUBuffer( vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties, vk::raii::Buffer& buffer, vk::raii::DeviceMemory& bufferMemory )
     {
         // You should know this by now, but I'm just regurgitating it.
