@@ -1392,7 +1392,7 @@ class HelloTriangleApplication
 
 
 
-        // The glm::rotate function takes an existing transformation, rotation angle and rotation axis as parameters.
+        // The glm::rotate function takes an existing transformation, rotation angle and rotation axis as parameters -- returns the model transformation matrix.
         ubo.model = rotate( glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f) );
         // first param: glm::mat4, is a 4x4 matrix; input sets the diagonals of the matrix to the inputted value: 1.0f means it's 1 on the diagonal, therefore it's an identity matrix.
         // second param: glm::radians() converts the input to radians, where the input is in degrees.
@@ -1409,21 +1409,24 @@ class HelloTriangleApplication
 
         // The glm::lookAt function takes the eye position, center position and up axis as parameters.
         ubo.view = lookAt( glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) );
-        // first param: where the eye position will be (so our camera is at 2x, 2y, 2z)
-        // second param: the point where the camera is looking at (our camera is facing 0x/0y/0z)
-        // third param, 'THE UP VECTOR': confusing, but "UP" is Z positive (NOT Y FOR SOME REASON WITH GLM) -- Typically (0x, 0y, 1z)
-        // See big_notes for how lookAt computes: https://learnopengl.com/Getting-started/Camera
+        // first param, .eye: where the eye position will be (so our camera is at 2x, 2y, 2z)
+        // second param, .center: the point where the camera is looking at (our camera is facing 0x/0y/0z)
+        // third param, .up, 'THE UP VECTOR': confusing, but "UP" is Z positive (NOT Y FOR SOME REASON WITH GLM) -- Typically (0x, 0y, 1z)
+        // See big_notes_math for how lookAt computes: https://learnopengl.com/Getting-started/Camera, but it literally just returns the view transformation matrix onto ubo.view
 
+        // The glm::perspective function takes the vertical field of view, aspect ratio, near and far view planes as parameters.
+        ubo.proj = glm::perspective( glm::radians(45.0f), static_cast<float>(swapChain_Extent_ImageResolution.width) / static_cast<float>(swapChain_Extent_ImageResolution.height), 0.1f, 10.0f );
+        // first param, .fovy: specifies the field of view angle in degrees in the Y direction
+        // second param, .aspect: the aspect ratio -- determines the field of view in the X direction
+        // third param, .zNear: specifies the distance from the camera to the near clipping plane (always positive)
+        // fourth param, .zFar: specifies the distance from the camera to the far clipping plane (always positive)
+        // see big_notes_math for how perspective computes: https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/gluPerspective.xml, but it literally just returns the perspective (kind of projection) transformation matrix onto ubo.proj
 
-        ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChain_Extent_ImageResolution.width) / static_cast<float>(swapChain_Extent_ImageResolution.height), 0.1f, 10.0f);
+        // GLM was originally designed for OpenGL, where the Y coordinate of the projection matrix is inverted, hence make it negative.
+        ubo.proj[1][1] *= -1; // if we don't do this, the image will be rendered upside down.
 
-
-        // the Y on the clip coordinates is inverted, hence make it negative.
-        ubo.proj[1][1] *= -1;
-
-
+        // A more efficient way to pass a small buffer of data to shaders is to use 'push constants'. We may look at these in a future chapter, but for now:
         memcpy( uniformBuffersMapped[currentImage], &ubo, sizeof(ubo) );
-
     }
 
     // This function is pretty much an exact copy of createVertexBuffer (but for indices) and so works in much the same way -- read createVertexBuffer() for an explanation.

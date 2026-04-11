@@ -367,3 +367,40 @@ Which is EXACTLY what GLM's lookAt( glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f,
 |                 0                  0                0               1 |
 
 -----------------------------------------------------------------
+
+for GLM's projection function:
+https://registry.khronos.org/OpenGL-Refpages/gl2.1/xhtml/gluPerspective.xml
+
+
+glm::perspective( glm::radians(45.0f), static_cast<float>(swapChain_Extent_ImageResolution.width) / static_cast<float>(swapChain_Extent_ImageResolution.height), 0.1f, 10.0f );
+
+f = cotangent ( ( fovy -- first parameter ) / 2 )
+f = contangent( 0.785398 / 2 ) = contangent( 0.392699 )
+f = 2.414214
+
+zNear = 0.1f (THIRD PARAMETER)
+zFar = 10.0f (FOURTH PARAMETER)
+
+Perspective just returns this matrix:
+
+| ( f/aspect )   0                             0                             0 |
+|            0   f                             0                             0 |
+|            0   0   ((zFar+zNear)/(zNear-zFar))   (2*zFar*zNear)/(zNear-zFar) |
+|            0   0                            -1                             0 |
+
+So....
+
+| ( 2.414214/aspect )          0                         0                         0 |
+|                   0   2.414214                         0                         0 |
+|                   0          0   ((10.0+0.1)/(0.1-10.0))   (2*10.0*0.1)/(0.1-10.0) |
+|                   0          0                        -1                         0 |
+
+Equal to...
+
+| ( 2.414214/aspect )          0                         0                         0 |
+|                   0   2.414214                         0                         0 |
+|                   0          0             -1.0202020202            -0.20202020202 |
+|                   0          0                        -1                         0 |
+
+And that's our projection perspective transformation matrix.
+-----------------------------------------------------------------
