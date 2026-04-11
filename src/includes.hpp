@@ -14,6 +14,7 @@ import vulkan_hpp;
 #include <vulkan/vulkan.h>
 #include <tiny_obj_loader.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 // window stuff
 #define GLFW_EXPOSE_NATIVE_WIN32    // Required to define for the #include below -- allows GLFW to show Windows handles (HWND/hInstance access)

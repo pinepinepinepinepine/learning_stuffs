@@ -512,5 +512,9 @@ The usage of a resource descriptor consists of three parts:
     2. Allocate a 'descriptor set' from a descriptor pool
     3. Bind the 'descriptor' set during rendering
 
-A 'descriptor set layout' specifies the types of resources that'll be accessed by the shaders (in the pipeline) (similarily w/ how we specify what color formats will be used for the rendering)
-A 'descriptor set' specifies the actual uniform buffer or image resources that'll be bound to the descriptors (where the data is housed) (similarily w/ how the image views gets binded to the render's attachments)
+A 'Descriptor Set Layout' specifies the types of resources that'll be accessed by the shaders (in the pipeline) (similarily w/ how we specify what color formats will be used for the rendering)
+    A Descriptor Set Layout contains multiple slots, and these slots are housed by individual Descriptor Set Layout Bindings
+
+A 'Descriptor Set Layout Binding' are the specific type of resources that are referenced by the Descriptor Set Layout
+
+A 'Descriptor Set' specifies the actual uniform buffer or image resources that'll be bound to the descriptors (where the data is housed) (similarily w/ how the image views gets binded to the render's attachments)

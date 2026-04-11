@@ -199,3 +199,171 @@ MVP'd Z  / w = Z
 the resulting division makes these coordinates in NDC (Normalized Device Coordinates) -- a range of -1 to 1
     if you have to convert the NDC to pixels (if vertex placement depends on pixels), then you'd first have to convert NDC to pixels.
 and NOW they can be placed in a 2D surface (so just use X and Y), where they'll render like it's 3D!
+
+
+
+-----------------------------------------------------------------
+
+https://stackoverflow.com/questions/17327906/what-glmnormalize-does
+vec3 normalize(const vec3 &v)
+{
+   float length_of_v = sqrt((v.x * v.x) + (v.y * v.y) + (v.z * v.z));
+   return vec3(v.x / length_of_v, v.y / length_of_v, v.z / length_of_v);
+}
+
+
+
+
+https://learnopengl.com/Getting-started/Camera
+
+lookAt( glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) );
+
+What GLM lookAt() does here is first calculate the Camera position + Camera direction + Right axis + Up axis FROM the input above.
+
+
+======
+
+Camera Position is LITERALLY just the eye param (first param) for lookAt().
+
+Camera Position: ( 2.0x, 2.0y, 2.0z )
+
+=====
+
+Camera Direction is glm::normalize(cameraPos - cameraTarget)
+So... glm::normalize( (2.0x, 2.0y, 2.0z) - (0.0f, 0.0f, 0.0f -- second parameter of lookAt) )
+
+    Before normalization: subtract the components: (2.0x, 2.0y, 2.0z) - (0.0x, 0.0y, 0.0z)
+(2.0x, 2.0y, 2.0z) - (0.0x, 0.0y, 0.0z) = ( 2.0x - 0.0x, 2.0y - 0.0y, 2.0z - 0.0z ) = (2.0x, 2.0y, 2.0z)
+
+    Then begin normalize()-ing the vector (see what it does above)
+First step: length_of_v = sqrt((v.x * v.x) + (v.y * v.y) + (v.z * v.z));
+
+    sqrt( (2.0x * 2.0x) + (2.0y * 2.0y) + (2.0z * 2.0z) ) = sqrt( (2.0x ^ 2) + (2.0y ^ 2) + (2.0z ^ 2) )
+    = sqrt( (4z) + (4y) + (4z) ) = sqrt(12) = 3.46410161514
+    length_of v = 3.46410161514
+
+Second step: (v.x / length_of_v, v.y / length_of_v, v.z / length_of_v)
+
+    (2.0x / 3.46410161514, 2.0y / 3.46410161514, 2.0z / 3.46410161514) = ( 0.57735026918x, 0.57735026918y, 0.57735026918z )
+
+Camera Direction: ( 0.57735026918x, 0.57735026918y, 0.57735026918z )
+
+=====
+
+Right axis is glm::normalize( glm::cross( up, cameraDirection ) )
+So... glm::normalize( glm::cross( (0.0f, 0.0f, 1.0f -- third parameter of lookAt), ( 0.57735026918x, 0.57735026918y, 0.57735026918z ) ) )
+
+We know what normalize is, but GLM's cross() calculates the 'CROSS PRODUCT' of two vectors. (this is gonna be long-winded, but i am glad i hadn't completely forgotten this shit from school -- ayy)
+    https://www.youtube.com/watch?v=pWbOisq1MJU
+
+
+                X               Y              Z
+|           0.0f,           0.0f,           1.0f |  first param of GLM cross()
+| 0.57735026918x, 0.57735026918y, 0.57735026918z |  second param of GLM cross()
+
+
+To get the cross product, first we have to format it properly:
+
+                   Matrix X
+    x |           0.0y            1.0z |
+      | 0.57735026918y  0.57735026918z |
+
+                   Matrix Y
+    y |           0.0x            1.0z |
+      | 0.57735026918x  0.57735026918z |
+
+                   Matrix Z
+    z |           0.0x            0.0y |
+      | 0.57735026918x  0.57735026918y |
+
+
+Then find the determinant of the 2x2 matrices
+    |A B|
+    |C D|
+    determinant of a matrix: ( A * D ) - ( B * C )
+
+    Determinant of Matrix X: ( 0.0y * 0.57735026918z ) - ( 0.57735026918y * 1.0z ) = ( 0 - 0.57735026918 ) = -0.57735026918
+    Determinant of Matrix Y: ( 0.0x * 0.57735026918z ) - ( 0.57735026918x * 1.0z ) = ( 0 - 0.57735026918 ) = -0.57735026918
+    Determinant of Matrix Z: ( 0.0x * 0.57735026918y ) - ( 0.57735026918x * 0.0y ) = 0
+
+Finally, we get our cross product vector:
+
+    cross product = ( (detX) - (detY) + (detZ) ) = ( (-0.57735026918) - (-0.57735026918) + (0) )
+    = (-0.57735026918x, 0.57735026918y, 0z )
+        the Y turns positive due to double subtraction.
+
+cross product = ( -0.57735026918x, 0.57735026918y, 0z )
+
+Then we have to normalize the cross product ( -0.57735026918x, 0.57735026918y, 0z ):
+
+    length_of_v = sqrt((v.x * v.x) + (v.y * v.y) + (v.z * v.z)) = sqrt( (-0.57735026918x^2) + (0.57735026918y^2) + (0z^2) )
+    = sqrt( (0.33333333332) + (0.33333333332) + (0) ) = sqrt( 0.66666666664 ) = 0.81649658091
+
+    length_of_v = 0.81649658091
+    (v.x / length_of_v, v.y / length_of_v, v.z / length_of_v) = ( -0.57735026918x / 0.81649658091, 0.57735026918y / 0.81649658091, 0z / 0.81649658091 )
+    = ( -0.70710678119x,  0.70710678119y, 0z )
+
+Right Axis: ( -0.70710678119x, 0.70710678119y, 0z )
+
+=====
+
+Up Axis is glm::cross( cameraDirection, cameraRight )
+So... the cross product of ( Camera Direction vector, Camera Right vector ), aka cross product of ( ( 0.57735026918x, 0.57735026918y, 0.57735026918z ), ( -0.70710678119x, 0.70710678119y, 0z ) )
+
+I can't be asked to format and calculate it manually again. But it's the same thing. I'm just using a calculator online.
+
+Up Axis: ( −0.40824829045905x, −0.40824829045905y, 0.8164965809181z )
+
+=====
+
+Camera Position (P):    (                2.0x,                2.0y,              2.0z )
+Camera Direction (D):   (      0.57735026918x,      0.57735026918y,    0.57735026918z )
+Right Axis (R):         (     -0.70710678119x,      0.70710678119y,                0z )
+Up Axis (U):            (  −0.40824829045905x,  −0.40824829045905y,  0.8164965809181z )
+
+
+Then, after lookAt() computes the Camera Position (P), Camera Direction (D), and Right (R) and Up (U) axis internally, it follows this formula:
+
+| Rx  Ry  Rz  0 |       | 1  0  0  -Px |
+| Ux  Uy  Uz  0 |   *   | 0  1  0  -Py |
+| Dx  Dy  Dz  0 |       | 0  0  1  -Pz |
+|  0   0   0  1 |       | 0  0  0    1 |
+
+So...
+
+|    -0.70710678119      0.70710678119                0  0 |       | 1  0  0  -2.0 |
+| −0.40824829045905  −0.40824829045905  0.8164965809181  0 |   *   | 0  1  0  -2.0 |
+|     0.57735026918      0.57735026918    0.57735026918  0 |       | 0  0  1  -2.0 |
+|                 0                  0                0  1 |       | 0  0  0     1 |
+
+
+Then you just multiply the two matrices together (formally called dot product)
+
+You just multiply row of the first matrix by column of the second one.
+
+( -0.70710678119, 0.70710678119, 0, 0 ) * ( 1, 0, 0, 0 )
+
+So...
+
+(First element in row * First element in column ) + (2nd in row * 2nd in column ) + (3rd in row * 3rd in column ) + (4th in row * 4th in column )
+( -0.70710678119 * 1 ) + ( 0.70710678119 * 0 ) + (0 * 0 ) + ( 0 * 0 )
+Which produces the first element in the new matrix's row.
+= -0.70710678119
+
+Then do the exact same thing for every row/column. UNBELIEVABLY TIME CONSUMING.
+You just shift the column of the second one until you complete all columns, then shift the row of the first one down, and repeat the column process till all have been filled.
+
+This is just another example, using Column 2 of the second matrix, still using Row 1 for the first matrix.
+( -0.70710678119 * 0 ) + ( 0.70710678119 * 1 ) + (0 * 0 ) + ( 0 * 0 ) = 0.70710678119
+
+I'm just gonna use a calculator online (https://matrix.reshish.com/matrix-multiplication/):
+
+And then we get our VIEW TRANSFORMATION MATRIX.
+Which is EXACTLY what GLM's lookAt( glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) ) will return (lookAt produces the view transformation matrix):
+
+|    -0.70710678119      0.70710678119                0               0 |
+| -0.40824829045905  -0.40824829045905  0.8164965809181               0 |
+|     0.57735026918      0.57735026918    0.57735026918  -3.46410161508 |
+|                 0                  0                0               1 |
+
+-----------------------------------------------------------------

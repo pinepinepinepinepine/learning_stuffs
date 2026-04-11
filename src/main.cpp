@@ -83,6 +83,9 @@ class HelloTriangleApplication
     std::vector<vk::Image> swapChainImages; // the image container in the swap chain
     std::vector<vk::raii::ImageView> swapChainImageViews; // how we access the image
 
+    // A 'descriptor set layout' specifies the types of resources that'll be accessed by the shaders (in the pipeline)
+    vk::raii::DescriptorSetLayout descriptorSetLayout = nullptr;
+
     // At this point, we're required to make a pipeline layout but won't be using it until a few chapter, so we're making it empty.
     vk::raii::PipelineLayout pipelineLayout = nullptr;
     vk::raii::Pipeline graphicsPipeline = nullptr; // the pipeline ITSELF!
@@ -101,6 +104,11 @@ class HelloTriangleApplication
     // same logic/idea with the Vertex Buffer right above.
     vk::raii::Buffer indexBuffer = nullptr;
     vk::raii::DeviceMemory indexBufferMemory = nullptr;
+
+    // ditto ^, but just a container of uniform buffers because we're gonna make one for every frame in flight, so we can be fast -- same logic as commandBuffers
+    std::vector<vk::raii::Buffer> uniformBuffers;
+    std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
+    std::vector<void*> uniformBuffersMapped; // a pointer to the memory region so we can write data to it later on.
 
     // see big_notes for an elaboration.
     // semaphore = forces GPU to wait; fence = forces CPU to wait.
@@ -166,6 +174,8 @@ class HelloTriangleApplication
         createSwapChain(); // create swap chain to have images actually render within the window
         createImageViews();
 
+        createDescriptorSetLayout(); // for an explanation of what this is, see BIG_NOTES. we need to create this before the pipeline as the pipeline'll require it.
+
         createGraphicsPipeline(); // For an explanation of the graphics pipeline, see BIG_NOTES
 
         createCommandPool(); // see function for elaboration
@@ -173,6 +183,8 @@ class HelloTriangleApplication
         createVertexBuffer(); // see function for elaboration
 
         createIndexBuffer(); // see function for elaboration
+
+        createUniformBuffers();
 
         createCommandBuffers(); // see function for elaboration
 
@@ -245,6 +257,11 @@ class HelloTriangleApplication
             // and still does after the next chapter.
 
         vk::PipelineStageFlags waitDestinationStageMask( vk::PipelineStageFlagBits::eColorAttachmentOutput );
+
+        // this just updates the uniformBuffer's transformation matrices so that we can actually make the object spin.
+        // remember the vertex shader references the uniform buffer directly with the descriptor layout, so we don't need to change anything to drawFrame -- the vertex shader function in shader.slang handles its position
+        updateUniformBuffer(wait_frameIndex);
+
 
         // the vk::SubmitInfo configures the queue submission and its synchronization through its members.
         const vk::SubmitInfo submitInfo {
@@ -835,6 +852,28 @@ class HelloTriangleApplication
     }
 
 
+    // WORK.
+    void createDescriptorSetLayout()
+    {
+        // See big notes: Descriptor Set Layout Binding specifies what the descriptor binds to (we've only one uniform buffer) and what shader can reference it (vertex shader) -- essentially making an individual binding slot in our Descriptor Set Layout
+        vk::DescriptorSetLayoutBinding uboLayoutBinding(
+            0, // the binding that the shader'll use as a sort of index to reference this specific resource/descriptor (in our case, binding 0 is the index for the Uniform Buffer)
+            vk::DescriptorType::eUniformBuffer, // .descriptorType: the descriptor (what the GPU'll access data from; aka the resource type), which will be a uniform buffer object
+            1,  // .descriptorCount: how many resources to link to this DescriptorSetLayoutBinding (we're only referencing a single UniformBuffer, hence 1)
+            vk::ShaderStageFlagBits::eVertex, // specifies which shader stage will reference this descriptor: it can be combined with BITWISE OR, or just be set to VK_SHADER_STAGE_ALL_GRAPHICS -- we're only gonna be using this within the vertex shader, hence eVertex
+            nullptr // The .pImmutableSamplers field is only relevant for image sampling related descriptors -- elaborated upon later.
+        );
+
+        // See big notes: Descriptor Set Layout specifies the resources that'll be accessible by containing multiple binding slots (DescriptorSetLayoutBinding) -- it's essentially a container of the individual bindings
+        vk::DescriptorSetLayoutCreateInfo layoutInfo {
+            .bindingCount = 1,              // the number of vk::DescriptorSetLayoutBindings within this Descriptor Set Layout
+            .pBindings = &uboLayoutBinding  // the DescriptorSetLayoutBindings themselves (which can contain an array of bindings -- .pBindings is a container/array)
+        };
+
+        // As with a bunch of other Vulkan objects, use the create info and the device to actually create the vk::raii::DescriptorSetLayout object.
+        descriptorSetLayout = vk::raii::DescriptorSetLayout( logicalDevice, layoutInfo );
+    }
+
     void createGraphicsPipeline()
     {
         auto shaderCode = readFile_SPIRVShaders("../shaders/slang.spv");
@@ -974,10 +1013,17 @@ class HelloTriangleApplication
 
         /*---*/
 
-        // As mentioned, we're making an empty pipeline layout as we're required to -- elaborated upon later.
-        // a pipeline layout contains uniform values (essentially global objects shared across) which can alter the behaviour of our shaders without having to recreate them,
-        // and push constants, which are a way of passing dynamic values to shaders, so allows uniform values to affect shaders.
-        vk::PipelineLayoutCreateInfo pipelineLayoutInfo{ .setLayoutCount = 0, .pushConstantRangeCount = 0 };
+        // We need to specify the descriptor set layout during pipeline creation to tell Vulkan which descriptors (resources) the shaders will be using
+            // a pipeline layout contains uniform values (essentially global objects shared across) which can alter the behaviour of our shaders without having to recreate them, (see BIG_NOTES for an elaboration.)
+            // and push constants, which are a way of passing dynamic values to shaders, so allows uniform values to affect shaders.
+        vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
+            .setLayoutCount = 1, // We're gonna be using a single descriptor set layout, hence 1
+            .pSetLayouts = &*descriptorSetLayout, // the descriptor set layout themselves
+                // it's elaborated upon later w/ descriptor pools and descriptor sets, but you can specify multiple layouts here.
+            .pushConstantRangeCount = 0 // push constants are like descriptors but more efficient, it'll be elaborated upon later (so ig if you really care just google whats up w/ these)
+        };
+
+
         pipelineLayout = vk::raii::PipelineLayout(logicalDevice, pipelineLayoutInfo);
 
         // States control how data flows/are processed throughout the pipeline stages -- these are the FIXED FUNCTION STAGES of the graphic pipeline.
@@ -1296,6 +1342,87 @@ class HelloTriangleApplication
         // first parameter specifies the memory handle to 'bind' the buffer to -- where this buffer's data exists.
         // second parameter is the offset within this region of memory (just keep it zero) -- if the offset is non-zero, then it is required to be divisible by memRequirements.alignment
         buffer.bindMemory( *bufferMemory, 0 ); // Without this, the buffer is NOT referencing ANY memory, and thus won't be useful -- the buffer object w/o a referenced memory region is pointless.
+
+    }
+
+
+    void createUniformBuffers()
+    {
+        // this clears the VECTOR container, not the memory itself -- only needed when we're recreating it, so its kinda pointless.
+        uniformBuffers.clear();
+        uniformBuffersMemory.clear();
+        uniformBuffersMapped.clear();
+
+        // I'm not providing comments here --you should know by now-- but yeah it's the same thing as w/ all buffers.
+        for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+        {
+            vk::DeviceSize uniformBufferSize = sizeof( UniformBufferObject );
+            vk::raii::Buffer uniformBuffer({});
+            vk::raii::DeviceMemory uniformBufferMemory({});
+
+            createGPUBuffer(
+                uniformBufferSize,
+                vk::BufferUsageFlagBits::eUniformBuffer,
+                vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+                uniformBuffer,
+                uniformBufferMemory
+            );
+
+            uniformBuffers.emplace_back( std::move( uniformBuffer ) ); // we need std::move here because we want an rvalue, and vk::raii::Buffer uniformBuffer is not copyable
+            uniformBuffersMemory.emplace_back( std::move( uniformBufferMemory ) );
+
+            uniformBuffersMapped.emplace_back( uniformBuffersMemory[i].mapMemory( 0, uniformBufferSize ) );
+            // The buffer stays mapped to this pointer for the application’s whole lifetime, allowing us to write data to its region later on.
+            // This technique is called "persistent mapping": not having to map the buffer every time we need to update it increases performances, as mapping is not free
+            // For an example, mapMemory(): for the vertex buffer, we call it and then close it -- this only occurs once to feed the data to the vertex buffer, so we don't need persistent mapping for that scenario.
+            // However, the uniform buffer will be updated EVERY call to drawFrame() with new data, so persistent mapping is WAY better because we don't have to map and unmap the region of memory, which, again, isn't free.
+        }
+    }
+
+
+    void updateUniformBuffer( uint32_t currentImage )
+    {
+        // We're using this to make the geometry rotate 90 degrees every second.
+        static auto startTime = std::chrono::high_resolution_clock::now();
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+
+        UniformBufferObject ubo{};
+
+
+
+        // The glm::rotate function takes an existing transformation, rotation angle and rotation axis as parameters.
+        ubo.model = rotate( glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f) );
+        // first param: glm::mat4, is a 4x4 matrix; input sets the diagonals of the matrix to the inputted value: 1.0f means it's 1 on the diagonal, therefore it's an identity matrix.
+        // second param: glm::radians() converts the input to radians, where the input is in degrees.
+        // third parameter: specifies where to rotate around: since Z is 1.0, it means to rotate around the Z axis.
+
+        /*
+        ubo.model will become, where p2 is time * glm::radians(90.0f)
+
+        | cos(p2)  -sin(p2)   0   0 |
+        | sin(p2)   cos(p2)   0   0 |
+        |       0         0   1   0 |
+        |       0         0   0   1 |
+        */
+
+        // The glm::lookAt function takes the eye position, center position and up axis as parameters.
+        ubo.view = lookAt( glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) );
+        // first param: where the eye position will be (so our camera is at 2x, 2y, 2z)
+        // second param: the point where the camera is looking at (our camera is facing 0x/0y/0z)
+        // third param, 'THE UP VECTOR': confusing, but "UP" is Z positive (NOT Y FOR SOME REASON WITH GLM) -- Typically (0x, 0y, 1z)
+        // See big_notes for how lookAt computes: https://learnopengl.com/Getting-started/Camera
+
+
+        ubo.proj = glm::perspective(glm::radians(45.0f), static_cast<float>(swapChain_Extent_ImageResolution.width) / static_cast<float>(swapChain_Extent_ImageResolution.height), 0.1f, 10.0f);
+
+
+        // the Y on the clip coordinates is inverted, hence make it negative.
+        ubo.proj[1][1] *= -1;
+
+
+        memcpy( uniformBuffersMapped[currentImage], &ubo, sizeof(ubo) );
 
     }
 
