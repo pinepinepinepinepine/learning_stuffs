@@ -2,12 +2,13 @@
 
 
 // transform matrices housed inside a uniform buffer -- see BIG_NOTES for a bit of an elaboration
+// see shader.slang for some additional comments relating to 'alignment requirements'
 struct UniformBufferObject {
-    glm::mat4 model;
+    glm::vec2 foo;
+    alignas(16) glm::mat4 model; // this member's address must be divisible by 16 -- this is due to alignment (it'll add padding between foo's size and 16 to force it to an alignment of 16.)
     glm::mat4 view;
     glm::mat4 proj;
 };
-
 
 struct Vertex
 {
