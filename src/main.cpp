@@ -121,6 +121,8 @@ class HelloTriangleApplication
     vk::raii::Image textureImage = nullptr;
     vk::raii::DeviceMemory textureImageMemory = nullptr;
 
+    vk::raii::ImageView textureImageView = nullptr; // image view, same logic as w/ the swap chain image views
+
     // see big_notes for an elaboration.
     // semaphore = forces GPU to wait; fence = forces CPU to wait.
     std::vector<vk::raii::Semaphore> presentCompleteSemaphore; // To signal an image has been grabbed from the swap chain, and is ready for rendering
@@ -183,7 +185,7 @@ class HelloTriangleApplication
         createLogicalDevice(); // this describes what features we want to actually use, and what queues to create
 
         createSwapChain(); // create swap chain to have images actually render within the window
-        createImageViews();
+        createSwapChainImageViews();
 
         createDescriptorSetLayout(); // for an explanation of what this is, see BIG_NOTES. we need to create this before the pipeline as the pipeline'll require it.
 
@@ -192,6 +194,8 @@ class HelloTriangleApplication
         createCommandPool(); // see function for elaboration
 
         createTextureImage();
+
+        createTextureImageView();
 
         createVertexBuffer(); // see function for elaboration
 
@@ -583,7 +587,7 @@ class HelloTriangleApplication
         graphicsQueue = vk::raii::Queue( logicalDevice, queueIndex, 0 ); // P.S, we're passing the second param from earlier (not from the logical_device itself) because vulkan doesn't store it.
     }
 
-    void createImageViews()
+    void createSwapChainImageViews()
     {
         // Make sure the image view container is empty as we're creating it here.
         assert(swapChainImageViews.empty());
@@ -636,7 +640,7 @@ class HelloTriangleApplication
 
         createSwapChain();
         // As a result of changing the swap chain, we also need to change our image views as the image views are supposed to be referencing the current swap chain's images, not the old one.
-        createImageViews();
+        createSwapChainImageViews();
 
         outputFile << get_current_time() << " | Finished the Recreation of the swap chain" << std::endl;
     }
@@ -1403,6 +1407,25 @@ class HelloTriangleApplication
         // In our case, we're using it to transition the Image's layout (vk::ImageLayout::eColorAttachmentOptimal, to, for instance, vk::ImageLayout::ePresentSrcKHR)
         // Another example: pipeline barriers can be used to transfer queue family ownership whenever using vk::SharingMode::eExclusive (so like changing the queue family for command buffers and swap chains)
 
+    }
+
+    // THE TUTORIAL DOESN'T WANNA CONVERT ALL THE RAII OBJECTS TO STANDARD, NON-RAII OBJECTS. ANNOYING.
+    // IF YOU WANT, ME, LET createSwapChainImageViews() (STRICTLY ONLY FOR SWAP CHAIN) use this function TOO! ANNOYING!
+    // just as a little reminder, the original tutorial doesn't use raii. IT'S THE SAME THING. just i don't know. documentation with raii is fucking annoying.
+    vk::raii::ImageView createImageView(vk::raii::Image &image, vk::Format format)
+	{
+		vk::ImageViewCreateInfo viewInfo{
+		    .image            = image,
+		    .viewType         = vk::ImageViewType::e2D,
+		    .format           = format,
+		    .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
+		return vk::raii::ImageView( logicalDevice, viewInfo );
+	}
+
+    // THE SAME IDEA AS SWAPCHAIN'S IMAGE VIEWS.
+    void createTextureImageView()
+    {
+        textureImageView = createImageView( textureImage, vk::Format::eR8G8B8A8Srgb );
     }
 
     void createTextureImage()

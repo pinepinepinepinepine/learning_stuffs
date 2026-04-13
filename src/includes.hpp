@@ -4,14 +4,14 @@
 #define GLFW_INCLUDE_VULKAN        // REQUIRED only for GLFW CreateWindowSurface. you could ditch the header right below this in exchange for this #define.
 
 #if defined(__INTELLISENSE__) || !defined(USE_CPP20_MODULES)
-#include <vulkan/vulkan_raii.hpp>
+#include <vulkan/vulkan_raii.hpp> // https://github.com/KhronosGroup/Vulkan-Headers/blob/main/include/vulkan/vulkan.hpp
 #else
 import vulkan_hpp;
 #endif
 
 // 3rd party libs
 #include <GLFW/glfw3.h>
-#include <vulkan/vulkan.h>
+#include <vulkan/vulkan.h> // https://github.com/KhronosGroup/Vulkan-Headers/blob/main/include/vulkan/vulkan.h (gateway to a bunch of other garbage)
 #include <tiny_obj_loader.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
