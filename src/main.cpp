@@ -118,7 +118,7 @@ class HelloTriangleApplication
 
     // image objects are used instead of directly reading element by element from the pixel array to the make an image.
     // it's faster this way, and cleaner -- pixels within an image object are known as "texels".
-    vk::raii::Image textureImage = nullptr;
+    VkImage textureImage = nullptr;
     vk::raii::DeviceMemory textureImageMemory = nullptr;
 
     vk::raii::ImageView textureImageView = nullptr; // image view, same logic as w/ the swap chain image views
@@ -1412,7 +1412,7 @@ class HelloTriangleApplication
     // THE TUTORIAL DOESN'T WANNA CONVERT ALL THE RAII OBJECTS TO STANDARD, NON-RAII OBJECTS. ANNOYING.
     // IF YOU WANT, ME, LET createSwapChainImageViews() (STRICTLY ONLY FOR SWAP CHAIN) use this function TOO! ANNOYING!
     // just as a little reminder, the original tutorial doesn't use raii. IT'S THE SAME THING. just i don't know. documentation with raii is fucking annoying.
-    vk::raii::ImageView createImageView(vk::raii::Image &image, vk::Format format)
+    vk::raii::ImageView createImageView( VkImage &image, vk::Format format )
 	{
 		vk::ImageViewCreateInfo viewInfo{
 		    .image            = image,
@@ -1496,7 +1496,7 @@ class HelloTriangleApplication
 
 
     void createImage( uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage,
-        vk::MemoryPropertyFlags properties, vk::raii::Image &image, vk::raii::DeviceMemory &imageMemory )
+        vk::MemoryPropertyFlags properties, VkImage &image, vk::raii::DeviceMemory &imageMemory )
     {
         vk::ImageCreateInfo imageInfo {
             .imageType = vk::ImageType::e2D, // what kind of coordinate system the texels (pixels on an image) uses (1D/2D/3D -- we're using 2D, so X and Y)
@@ -1514,10 +1514,12 @@ class HelloTriangleApplication
             // https://docs.vulkan.org/tutorial/latest/06_Texture_mapping/00_Images.html#_texture_image
         };
 
-        image = vk::raii::Image( logicalDevice, imageInfo );
+        vkCreateImage( *logicalDevice, imageInfo, nullptr, &image );
+
+        vk::MemoryRequirements memRequirements {};
 
         // allocating memory for an image works the exact same way as a buffer -- just ctrl F 'buffer.bindMemory( *bufferMemory, 0 )'
-        vk::MemoryRequirements memRequirements = image.getMemoryRequirements();
+        vkGetImageMemoryRequirements( *logicalDevice, image, &(*memRequirements) );
 
         vk::MemoryAllocateInfo allocInfo {
             .allocationSize = memRequirements.size,
@@ -1526,7 +1528,7 @@ class HelloTriangleApplication
 
         imageMemory = vk::raii::DeviceMemory( logicalDevice, allocInfo );
 
-        image.bindMemory( imageMemory, 0 );
+        vkBindImageMemory( *logicalDevice, image, *imageMemory, 0 );
     }
 
 
@@ -1797,7 +1799,7 @@ class HelloTriangleApplication
         endSingleTimeCommands( commandCopyBuffer );
     }
 
-    void copyBufferToImage( const vk::raii::Buffer& buffer, vk::raii::Image& image, uint32_t width, uint32_t height )
+    void copyBufferToImage( const vk::raii::Buffer& buffer, VkImage& image, uint32_t width, uint32_t height )
     {
         auto commandBuffer = beginSingleTimeCommands();
 
@@ -1833,7 +1835,7 @@ class HelloTriangleApplication
     }
 
 
-    void transitionImageLayout(const vk::raii::Image& image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout)
+    void transitionImageLayout(const VkImage& image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout)
     {
         auto commandBuffer = beginSingleTimeCommands();
 
