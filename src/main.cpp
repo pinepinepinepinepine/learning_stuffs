@@ -356,6 +356,10 @@ class HelloTriangleApplication
         //debugMessenger = nullptr; // vkDestroyDebugUtilsMessengerEXT( instance, debugMessenger, nullptr); We're using RAII so we can't use this due to variable mismatch.
         //instance = nullptr; // switch them around and youll get a severe error message -- from callback!
 
+
+        // textureImage isn't raii. We have to delete it ourselves.
+        vkDestroyImage( *logicalDevice, textureImage, nullptr );
+
         glfwDestroyWindow( window ); // Make sure to also destroy the GLFW objects since we also used a creation function on it
         glfwTerminate(); // Call this whenever we are COMPLETELY finished with the GLFW: it destroys EVERYTHING glfw related.
     }
@@ -592,20 +596,9 @@ class HelloTriangleApplication
         // Make sure the image view container is empty as we're creating it here.
         assert(swapChainImageViews.empty());
 
-        vk::ImageViewCreateInfo imageViewCreateInfo {
-            .viewType         = vk::ImageViewType::e2D,                         // Specifies we're rending to a 2D screen. (:e3D is 3d; :e1D is 1d)
-            .format           = swapChain_surfaceFormat.format,                 // The color format
-            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 } // Describe's the image's purpose and which part of the image should be accessed (we're specifying Color)
-        }; // There's also a .components field which mixes color channels around: imageViewCreateInfo.components = { vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity}; for an example (no clue)
-        // Hypothetically, if we had vk::SwapchainCreateInfoKHR::imageArrayLayers above 1, we should make multiple image views for each different layer to access them individually -- the maximum amount of image views is generally 16.
-
-        for (auto &swapChainImage : swapChainImages)
+        for ( auto &swapChainImage : swapChainImages )
         {
-            // ImageViews objects are referencing the original Image object (similarily to std::string_view): we're just saying this this imageView's Info is pointing to this swapChainImage.
-            // Then, we just push the imageView we just properly created (signalled by assigning .Image) into the swapChainImageViews member variable.
-            imageViewCreateInfo.image = swapChainImage;
-            swapChainImageViews.emplace_back( logicalDevice, imageViewCreateInfo );
-                // notice how for every vk::raii::ImageView in swapChainImageView, we're using the same imageViewCreateInfo -- every image view has the same properties
+            swapChainImageViews.emplace_back( createImageView( swapChainImage, swapChain_surfaceFormat.format ) );
         }
     }
 
@@ -1412,13 +1405,16 @@ class HelloTriangleApplication
     // THE TUTORIAL DOESN'T WANNA CONVERT ALL THE RAII OBJECTS TO STANDARD, NON-RAII OBJECTS. ANNOYING.
     // IF YOU WANT, ME, LET createSwapChainImageViews() (STRICTLY ONLY FOR SWAP CHAIN) use this function TOO! ANNOYING!
     // just as a little reminder, the original tutorial doesn't use raii. IT'S THE SAME THING. just i don't know. documentation with raii is fucking annoying.
-    vk::raii::ImageView createImageView( VkImage &image, vk::Format format )
+    vk::raii::ImageView createImageView( const VkImage &image, vk::Format format )
 	{
-		vk::ImageViewCreateInfo viewInfo{
-		    .image            = image,
-		    .viewType         = vk::ImageViewType::e2D,
-		    .format           = format,
-		    .subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1}};
+		vk::ImageViewCreateInfo viewInfo {
+		    .image            = image, // the image we're making a view of
+		    .viewType         = vk::ImageViewType::e2D, // Specifies we're rending to a 2D screen. (:e3D is 3d; :e1D is 1d)
+		    .format           = format, // The color format
+		    .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 } // Describe's the image's purpose and which part of the image should be accessed (we're specifying Color)
+        }; // There's also a .components field which mixes color channels around: imageViewCreateInfo.components = { vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity}; for an example (no clue)
+        // Hypothetically, if we had vk::SwapchainCreateInfoKHR::imageArrayLayers above 1, we should make multiple image views for each different layer to access them individually -- the maximum amount of image views is generally 16.
+
 		return vk::raii::ImageView( logicalDevice, viewInfo );
 	}
 

@@ -538,3 +538,32 @@ For practical applications it is recommended to combine these operations in a si
 Try to experiment with this by creating a setupCommandBuffer that the helper functions record commands into, and add a flushSetupCommands to execute the commands that have been recorded so far.
 It’s best to do this after the texture mapping works to check if the texture resources are still set up correctly.
 TLDR: COMBINE COMMAND BUFFERS INTO A CENTRAL ONE INSTEAD OF MAKING A BUNCH OF TEMPORARY, MINI COMMAND BUFFERS THAT ALL DO THEIR OWN RESPECTIVE THING
+
+----
+old garbage code:
+    void createSwapChainImageViews()
+    {
+        // Make sure the image view container is empty as we're creating it here.
+        assert(swapChainImageViews.empty());
+
+        vk::ImageViewCreateInfo imageViewCreateInfo {
+            .viewType         = vk::ImageViewType::e2D,                         // Specifies we're rending to a 2D screen. (:e3D is 3d; :e1D is 1d)
+            .format           = swapChain_surfaceFormat.format,                 // The color format
+            .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 } // Describe's the image's purpose and which part of the image should be accessed (we're specifying Color)
+        }; // There's also a .components field which mixes color channels around: imageViewCreateInfo.components = { vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity}; for an example (no clue)
+        // Hypothetically, if we had vk::SwapchainCreateInfoKHR::imageArrayLayers above 1, we should make multiple image views for each different layer to access them individually -- the maximum amount of image views is generally 16.
+
+        for (auto &swapChainImage : swapChainImages)
+        {
+            // ImageViews objects are referencing the original Image object (similarily to std::string_view): we're just saying this this imageView's Info is pointing to this swapChainImage.
+            // Then, we just push the imageView we just properly created (signalled by assigning .Image) into the swapChainImageViews member variable.
+            imageViewCreateInfo.image = swapChainImage;
+            swapChainImageViews.emplace_back( logicalDevice, imageViewCreateInfo );
+                // notice how for every vk::raii::ImageView in swapChainImageView, we're using the same imageViewCreateInfo -- every image view has the same properties
+        }
+    }
+
+// THE TUTORIAL DOESN'T WANNA CONVERT ALL THE RAII OBJECTS TO STANDARD, NON-RAII OBJECTS. ANNOYING.
+// IF YOU WANT, ME, LET createSwapChainImageViews() (STRICTLY ONLY FOR SWAP CHAIN) use this function TOO! ANNOYING!
+// just as a little reminder, the original tutorial doesn't use raii. IT'S THE SAME THING. just i don't know. documentation with raii is fucking annoying.
+---
