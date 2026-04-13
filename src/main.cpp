@@ -116,6 +116,11 @@ class HelloTriangleApplication
     std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
     std::vector<void*> uniformBuffersMapped; // a pointer to the memory region so we can write data to it later on.
 
+    // image objects are used instead of directly reading element by element from the pixel array to the make an image.
+    // it's faster this way, and cleaner -- pixels within an image object are known as "texels".
+    vk::raii::Image textureImage = nullptr;
+    vk::raii::DeviceMemory textureImageMemory = nullptr;
+
     // see big_notes for an elaboration.
     // semaphore = forces GPU to wait; fence = forces CPU to wait.
     std::vector<vk::raii::Semaphore> presentCompleteSemaphore; // To signal an image has been grabbed from the swap chain, and is ready for rendering
@@ -185,6 +190,8 @@ class HelloTriangleApplication
         createGraphicsPipeline(); // For an explanation of the graphics pipeline, see BIG_NOTES
 
         createCommandPool(); // see function for elaboration
+
+        createTextureImage();
 
         createVertexBuffer(); // see function for elaboration
 
@@ -1389,7 +1396,116 @@ class HelloTriangleApplication
         };
 
         commandBuffers[wait_frameIndex].pipelineBarrier2( dependency_info );
+        // https://docs.vulkan.org/tutorial/latest/06_Texture_mapping/00_Images.html
+        // Pipeline barriers are used for synchronizing access to resources: make sure that dependency_info's barrier has passed.
+        // Operations occuring in barrier's .dstStageMask CANNOT occur before barrier's .srcStageMask finishes -- wait for source to finish executing before continuing to the destination.
+        // For example, this can be used to make sure an image was written before it is read -- kinda like a semaphore.
+        // In our case, we're using it to transition the Image's layout (vk::ImageLayout::eColorAttachmentOptimal, to, for instance, vk::ImageLayout::ePresentSrcKHR)
+        // Another example: pipeline barriers can be used to transfer queue family ownership whenever using vk::SharingMode::eExclusive (so like changing the queue family for command buffers and swap chains)
+
     }
+
+    void createTextureImage()
+    {
+        // stb_image stuff!
+
+        int texWidth, texHeight, texChannels;
+
+        // stbi_load:
+        // first param: takes the file path for where to find the image
+        // second and third param: the image's width and height in pixels
+        // fourth param: the number of colour channels this image uses
+        // fifth param: forces the image to be loaded in a certain way: in our case, force it to load w/ an RGB and alpha channel (even if it doesn't have one -- just for consistency)
+        // the return is a pointer to the first element in an array of pixel values: the pixels are laid out row by row with 4 bytes per pixel (if specified w/ STBI_rgb_alpha )
+        stbi_uc* pixels = stbi_load( "../textures/fatfatmillycat.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha );
+
+        // calculates the byte size of the image. just get the area (width x height), and multiply by bytes per pixel (4 in our case due to STBI_rgb_alpha)
+        vk::DeviceSize imageSize = texWidth * texHeight * 4;
+
+        if (!pixels) { // and ofc if pixels is invalid (nullptr), throw an error
+            throw std::runtime_error("failed to load texture image!");
+        }
+
+
+        // see BIG_NOTES: it's better to use a mule/staging buffer (similarily w/ indices/vertex, for some examples) to move image data to GPU memory instead of keeping the image in CPU memory and communicating w/ a bad memory type.
+        vk::raii::Buffer stagingBuffer({});
+        vk::raii::DeviceMemory stagingBufferMemory({});
+
+        // see the vertex/index staging buffers for an elaboration.
+        createGPUBuffer(
+            imageSize,
+            vk::BufferUsageFlagBits::eTransferSrc,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            stagingBuffer,
+            stagingBufferMemory
+        );
+
+        // again, not explaining it.
+        void* data = stagingBufferMemory.mapMemory( 0, imageSize );
+        memcpy( data, pixels, imageSize );
+        stagingBufferMemory.unmapMemory();
+
+        // we free/delete the original, old pixels array because we no longer need it -- it's been copied over to stagingBufferMemory's mapped memory.
+        // pixels is just a pointer to an array, but the underlying array that contains the pixel data won't be automatically deleted when the pointer goes out of scope, hence:
+        stbi_image_free( pixels );
+
+        // creates an empty vk::raii::Image object -- this does NOT have the actual image/pixel data, we give textureImage the data by copying the staging buffer to the image (below)
+        createImage(
+            texWidth,
+            texHeight,
+            vk::Format::eR8G8B8A8Srgb,
+            vk::ImageTiling::eOptimal,
+            vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            textureImage,
+            textureImageMemory
+        );
+
+        // transitions textureImage to an optimal layout to receive pixel values (after creation, it's .initialLayout (member) is equal to eUndefined )
+        transitionImageLayout( textureImage, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal );
+
+        // actually copy the staging buffer's pixel data onto the texture image -- textureImage now actually has pixel data
+        copyBufferToImage( stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight) );
+
+        // transitions textureImage to an optimal layout for shader access
+        transitionImageLayout( textureImage, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal );
+    }
+
+
+    void createImage( uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage,
+        vk::MemoryPropertyFlags properties, vk::raii::Image &image, vk::raii::DeviceMemory &imageMemory )
+    {
+        vk::ImageCreateInfo imageInfo {
+            .imageType = vk::ImageType::e2D, // what kind of coordinate system the texels (pixels on an image) uses (1D/2D/3D -- we're using 2D, so X and Y)
+                // 1D and 3D is confusing in the context of an image: 1D can store an array of data or a gradient, whereas 3D can be used to store 'voxel volumes'
+            .format = format,
+            .extent = {width, height, 1}, // the dimensions (extent) of the image: so, width = X, height = Y, and 1 = depth (we use 1 as depth because we've one pixel, so it's technically 1 pixel Z -- its a layer)
+            .mipLevels = 1, // 1 means we aren't using mipmapping
+            .arrayLayers = 1, // 1 means our image/texture will not be an array.
+            .samples = vk::SampleCountFlagBits::e1, // referring to multi-sampling: only relevant for images that are used as attachments, so we just e1 it to specify only one.
+            .tiling = tiling, // how the texels are arranged in memory. vulkan supports two tiling methods:
+                // vk::ImageTiling::eOptimal: Texels are laid out in an implementation-dependent arrangement. This results in a more efficient memory access. Vulkan handles this one, you don't define tiling yourself per-say. Generally choose this one always.
+                // vk::ImageTiling::eLinear: Texels are laid out in memory in row-major order, possibly with some padding on each row. Essentially, texels are stored in an array of an array linearly (pixel 1 goes to [0][0], pixel 2 goes to [0][1], like a grid)
+            .usage = usage, // what the usage of this image will be, similar to buffer creation. In our case, we want to transfer the image to be muled onto the GPU, non CPU speaking buffer (and also colour our mesh, so vk::ImageUsageFlagBits::eSampled)
+            .sharingMode = vk::SharingMode::eExclusive // same thing: we want one queue family at a time to be utilized/own this.
+            // https://docs.vulkan.org/tutorial/latest/06_Texture_mapping/00_Images.html#_texture_image
+        };
+
+        image = vk::raii::Image( logicalDevice, imageInfo );
+
+        // allocating memory for an image works the exact same way as a buffer -- just ctrl F 'buffer.bindMemory( *bufferMemory, 0 )'
+        vk::MemoryRequirements memRequirements = image.getMemoryRequirements();
+
+        vk::MemoryAllocateInfo allocInfo {
+            .allocationSize = memRequirements.size,
+            .memoryTypeIndex = findGPUBufferMemoryType(memRequirements.memoryTypeBits, properties)
+        };
+
+        imageMemory = vk::raii::DeviceMemory( logicalDevice, allocInfo );
+
+        image.bindMemory( imageMemory, 0 );
+    }
+
 
 
     // Abstracted GPU buffer creation function -- see big_note's original createVertexBuffer() for the original.
@@ -1606,8 +1722,7 @@ class HelloTriangleApplication
         outputFile << get_current_time() << " | Copied the contents of the Staging Buffer to the Vertex Buffer" << std::endl;
     }
 
-
-    void copyBuffer( vk::raii::Buffer & srcBuffer, vk::raii::Buffer & dstBuffer, vk::DeviceSize size )
+    vk::raii::CommandBuffer beginSingleTimeCommands()
     {
         // Memory transfer operations are executed using command buffers, similarily to drawing commands. So, first step is to make a (temporary) command buffer
             // It's probably a good idea to make a seperate global command pool for short-lived, temporary command buffers as we could apply memory allocation optimizations
@@ -1623,24 +1738,153 @@ class HelloTriangleApplication
         // ctrl-f std::move within BIG_NOTES to see what this line does
         // TLDR, though, is we don't want a reference, we want the actual commandBuffer, so we use std::move to return an rvalue (raw data, no address) rather than a reference to avoid dangling.
         // in the BIG_NOTE comment, vk::raii::CommandBuffers is equivalent to allocateCommandBuffers() -- both return a CONTAINER of command buffers, not an individual buffer, hence .front()
-        vk::raii::CommandBuffer commandCopyBuffer = std::move( logicalDevice.allocateCommandBuffers( allocInfo ).front() );
+        vk::raii::CommandBuffer temp_commandBuffer = std::move( logicalDevice.allocateCommandBuffers( allocInfo ).front() );
 
         // while not necessary, it's good practice to tell the drive our intent with VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT... Anyways, all this does is begin the recording of the command buffer.
-        commandCopyBuffer.begin( vk::CommandBufferBeginInfo { .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit } );
+        temp_commandBuffer.begin( vk::CommandBufferBeginInfo { .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit } );
 
-        // copyBuffer just copies the contents of the Source Buffer (param1) into the Destination Buffer (param2) up to whatever bytes (param3)
-        // copyBuffer's third param takes a vk::BufferCopy object, the first two members of BufferCopy struct is .srcOffset and .dstOffset (we're not offsetting what byte to start from, hence both 0), and the .size
-        commandCopyBuffer.copyBuffer( srcBuffer, dstBuffer, vk::BufferCopy( 0, 0, size ) );
+        return temp_commandBuffer;
+    }
 
+    void endSingleTimeCommands(vk::raii::CommandBuffer& commandBuffer)
+    {
         // end the recording of the command buffer.
-        commandCopyBuffer.end();
+        commandBuffer.end();
 
-        // send the command buffer into the graphics queue to be actually executed, and thus to actually copy the contents over.
-        graphicsQueue.submit( vk::SubmitInfo{ .commandBufferCount = 1, .pCommandBuffers = &*commandCopyBuffer }, nullptr );
+        // send the command buffer into the graphics queue to be actually executed (executing whatever was recorded), and thus to actually copy the contents over.
+        graphicsQueue.submit( vk::SubmitInfo{ .commandBufferCount = 1, .pCommandBuffers = &*commandBuffer }, nullptr );
 
         // instead of passing nullptr as submit()'s fence argument, might be a good idea to actually use a fence (instead of nothing), but whatever, we're lazy,
         // obviously a fence is better because it'll allow synchronization, but anyway lets just wait until the graphic queue is empty altogether because. we. are. lazy.
         graphicsQueue.waitIdle();
+    }
+
+
+    void copyBuffer( vk::raii::Buffer& srcBuffer, vk::raii::Buffer& dstBuffer, vk::DeviceSize size )
+    {
+        // just returns a ready to record (.begin'd) command buffer
+        vk::raii::CommandBuffer commandCopyBuffer = beginSingleTimeCommands();
+
+        // record the buffer:
+        // copyBuffer just copies the contents of the Source Buffer (param1) into the Destination Buffer (param2) up to whatever bytes (param3)
+        // copyBuffer's third param takes a vk::BufferCopy object, the first two members of BufferCopy struct is .srcOffset and .dstOffset (we're not offsetting what byte to start from, hence both 0), and the .size
+        commandCopyBuffer.copyBuffer( srcBuffer, dstBuffer, vk::BufferCopy( 0, 0, size ) );
+
+        // moved the old code to endSingleTimeCommands -- it's the same gimmick, just sends the buffer to execute its recorded commands.
+        endSingleTimeCommands( commandCopyBuffer );
+    }
+
+    void copyBufferToImage( const vk::raii::Buffer& buffer, vk::raii::Image& image, uint32_t width, uint32_t height )
+    {
+        auto commandBuffer = beginSingleTimeCommands();
+
+        // Specifies what region/part of the buffer will be copied.
+        vk::BufferImageCopy region {
+            .bufferOffset = 0, // where the pixel values start
+            .bufferRowLength = 0, // how the pixels are laid out in memory: 0 indicates there's no padding in the rows (left to right) between pixel values.
+            .bufferImageHeight = 0, // ditto^: 0 indicates there's no padding in the columns (from the row) between pixel values.
+
+            // what parts of the image we want to copy
+            .imageSubresource = { // as a whole, specifies the specific part of the image (see transitionImageLayout for something similar)
+                vk::ImageAspectFlagBits::eColor, // .aspectMask
+                0,  // .mipLevel
+                0,  // .baseArrayLayer
+                1   // .layerCount
+            }, // Collectively, we want to copy the first layer's color
+
+            // XYZ: we start from the very beginning because we want everything.
+            .imageOffset = { 0, 0, 0 },
+
+            // XYZ: where we end -- note the Z is 1 because while it's a 2D image it's still a layer -- it just has no depth.
+            .imageExtent = { width, height, 1 }
+        };
+
+        // Transfers the buffer data (first param) into the image (second param)
+        // the third parameter indicates which layout the image is currently using, so it can correctly transfer the pixels -- IT DOES NOT AUTOMATICALLY CHANGE IT FOR YOU. YOU MUST DO IT YOURSELF.
+            // It's assumed by now that the image has already been transitioned to the layout optimal for copying pixels to.
+        // The fourth parameter is just the region of what to copy: for now, we're just copying the whole chunk of pixels with just the entire region itself.
+            // it's possible to specify an array of vk::BufferImageCopy to perform many different copies from this buffer to the image
+        commandBuffer.copyBufferToImage( buffer, image, vk::ImageLayout::eTransferDstOptimal, {region} );
+
+        endSingleTimeCommands( commandBuffer );
+    }
+
+
+    void transitionImageLayout(const vk::raii::Image& image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout)
+    {
+        auto commandBuffer = beginSingleTimeCommands();
+
+        // The transitions of an image are performed using pipeline barriers, which not only change the image layout themselves, but also ensure proper synchronization between operations that access the image.
+        // One of the most common ways to perform a layout transition is through an 'image memory barrier'
+        vk::ImageMemoryBarrier barrier {
+            .oldLayout = oldLayout, // the old, current layout: if we don't care about keeping the old data, use vk::ImageLayout::eUndefined this here.
+            .newLayout = newLayout, // the new layout to transition to
+            .image = image, // the image we'll be transitioning (its layout)
+            .subresourceRange { // as a whole, specifies the specific part of the image
+                vk::ImageAspectFlagBits::eColor, // .aspectMask: what aspect of the image to change (Color or Depth, for instance)
+                0, // .baseMipLevel: which mipmap to start from (don't worry about it for now)
+                1, // .levelCount: how many mipmaps to include (don't worry about it for now)
+                0, // .baseArrayLayer: which array layer to start from (we're starting from the first layer because it's a single image -- index 0)
+                1  // .LayerCount: how many array layers to include (we're only including 1)
+            }
+        };
+
+        vk::PipelineStageFlags sourceStage;
+        vk::PipelineStageFlags destinationStage;
+
+        // The difference between the stage and access masks is that the PipelineStageFlags (stage) sets what pipeline stage is before/after the barrier.
+        // whereas the access masks describe what exact kind of operation must've occured within that pipeline stage before/after the barrier
+        if ( oldLayout == vk::ImageLayout::eUndefined && newLayout == vk::ImageLayout::eTransferDstOptimal )
+        {
+            barrier.srcAccessMask = {};
+            barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+
+            // due to srcAccessMask being empty, this is technically redundant, we're just saying topOfPipe because A) it's common practice + its the earliest stage of the pipeline
+            // and B) vulkan still relies on a not-so-stupid stage here.
+            sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
+            destinationStage = vk::PipelineStageFlagBits::eTransfer;
+            // eTransfer is one of many pseudo-stages. for more info: https://docs.vulkan.org/spec/latest/chapters/synchronization.html#VkPipelineStageFlagBits
+
+            // Intuitively: Whenever we're in the pipeline stages, once we get to an operation which flags eTransferWrite in the eTransfer pipeline,
+            // ensure that the sourceStage's (eTopOfPipe) operations flagged with srcAccessMask has finished executing.
+            // Since srcAccessMask is empty, we DO NOT RELY ON ANY OPERATIONS TO FINISH, so eTransferWrite can commence whenever it gets to eTransferWrite flagged operations.
+        }
+        else if (oldLayout == vk::ImageLayout::eTransferDstOptimal && newLayout == vk::ImageLayout::eShaderReadOnlyOptimal)
+        {
+            barrier.srcAccessMask =  vk::AccessFlagBits::eTransferWrite;
+            barrier.dstAccessMask =  vk::AccessFlagBits::eShaderRead;
+
+            sourceStage = vk::PipelineStageFlagBits::eTransfer;
+            destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
+
+            // The image will be written in the same pipeline stage and subsequently read by the fragment shader, which is why we specify shader reading access in the fragment shader pipeline stage.
+        }
+        else
+            throw std::invalid_argument("unsupported layout transition!");
+
+        // There is also a general layout that does everything, albeit with a performance cost: vk::ImageLayout::eGeneral
+        // However, if you want to output and input an image, it's handy.
+
+
+        // Barriers are primarily used for synchronization purposes.
+        // You must specify which types of operations must happen before the barrier,
+        // and which types of operations must occur after the barrier.
+
+        // the first parameter (sourceStage) specifies which stage of the pipeline the specified srcAccessMask flagged operations occur in.
+            // Before reaching the barrier's specified destination operations, the srcAccessMask flagged operations must finish before commencing destination flagged operations.
+        // the second parameter (destinationStage) specifies which stage of the pipeline the specified dstAccessMask flagged operations occur in.
+            // Whenever reaching the dstAccessMask flagged operations in the destinationStage, wait for srcAccessMask flagged operations in sourceStage to finish executing before commencing destination flagged operations.
+        // The pipeline stages that you are allowed to specify before and after the barrier depend on how you use the resource (the image in our case) before and after the barrier: https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-access-types-supported
+
+        // Third parameter is either 0 (which it is here), or vk::DependencyFlagBits::eByRegion: eByRegion which means the regions of the resource that were fully written to can be accessed even if collectively they are not.
+        // Last 3 parameters reference the 3 types of pipeline barriers:  memory barriers, buffer memory barriers, and image memory barriers, respectively.
+            // We're just using the image memory barrier, hence we're passing our vk::ImageMemoryBarrier barrier object.
+        commandBuffer.pipelineBarrier(sourceStage, destinationStage, {}, {}, nullptr, barrier);
+            // Even though we are using graphicsQueue.waitIdle(); at the end of endSingleTimeCommands, when pipelineBarrier gets executed, it won't reach the wait, hence why we need this barrier.
+            // unrelated to above, but see transition_image_layout (yes for some reason there's two -- i presume due to this operating with images-images and that one w/ swap chain images)
+        // Implicitly, command buffer submissions result in an: vk::AccessFlagBits::eHostWrite (so if you want to wait on the CPU to send a command, you can use it.)
+
+        endSingleTimeCommands(commandBuffer);
     }
 
 

@@ -32,6 +32,7 @@ ${VULKAN_SDK}/Include
 ${TINY}
 ${GLFW}
 ${SLANG}/include
+"C:/stb" # lazy
 "C:/mSys Stuff/ucrt64/include" # lazy
 )
 

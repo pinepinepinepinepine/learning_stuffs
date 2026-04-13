@@ -518,3 +518,23 @@ A 'Descriptor Set Layout' specifies the types of resources that'll be accessed b
 A 'Descriptor Set Layout Binding' are the specific type of resources that are referenced by the Descriptor Set Layout
 
 A 'Descriptor Set' specifies the actual uniform buffer or image resources that'll be bound to the descriptors (where the data is housed) (similarily w/ how the image views gets binded to the render's attachments)
+
+
+=======
+
+Adding textures (images) to our application will involve the following steps:
+    1. Create an image object utilizing device memory (image object stored within device memory)
+    2. Fill the image object with pixels from an image file
+    3. Create an image sampler (specifies how the image is rendered)
+    4. Add a combined image sampler descriptor to sample colors from the texture
+        no clue.
+
+Images should always reside in GPU memory, as leaving them in the CPU memory requires the GPU to read the data through an unoptimized memory type, which is a heavy cost on performance.
+So, we create another staging buffer (mule: a buffer which moves image data to GPU memory -- see indices buffer for an example).
+
+
+All the helper functions that submit commands so far have been set up to execute synchronously by waiting for the queue to become idle.
+For practical applications it is recommended to combine these operations in a single command buffer and execute them asynchronously for higher throughput, especially the transitions and copy in the createTextureImage function.
+Try to experiment with this by creating a setupCommandBuffer that the helper functions record commands into, and add a flushSetupCommands to execute the commands that have been recorded so far.
+It’s best to do this after the texture mapping works to check if the texture resources are still set up correctly.
+TLDR: COMBINE COMMAND BUFFERS INTO A CENTRAL ONE INSTEAD OF MAKING A BUNCH OF TEMPORARY, MINI COMMAND BUFFERS THAT ALL DO THEIR OWN RESPECTIVE THING
