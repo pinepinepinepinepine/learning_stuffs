@@ -123,6 +123,8 @@ class HelloTriangleApplication
 
     vk::raii::ImageView textureImageView = nullptr; // image view, same logic as w/ the swap chain image views
 
+    vk::raii::Sampler textureSampler = nullptr; // the texture sampler: see big_notes, but in order to get a final texture, you sample it (applying filtering and transformations) from the texture image view.
+
     // see big_notes for an elaboration.
     // semaphore = forces GPU to wait; fence = forces CPU to wait.
     std::vector<vk::raii::Semaphore> presentCompleteSemaphore; // To signal an image has been grabbed from the swap chain, and is ready for rendering
@@ -194,8 +196,8 @@ class HelloTriangleApplication
         createCommandPool(); // see function for elaboration
 
         createTextureImage();
-
         createTextureImageView();
+        createTextureSampler();
 
         createVertexBuffer(); // see function for elaboration
 
@@ -481,7 +483,8 @@ class HelloTriangleApplication
         // We need to grab ahold of this physical device's vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>(), so we use a template function
         auto features = physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
         // Then we check if they actually exist for this physical device through features (these act as a sort of bool here -- if they're false, our device doesn't support it)
-        bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
+        bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy && // anistropic filtering is an optional device feature: most modern gpus have it, but we're just being safe by checking if it's compatible w/ our device
+                                        features.template get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
                                         features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
                                         features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
                                         features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
@@ -561,10 +564,10 @@ class HelloTriangleApplication
         // has a pNext field that can point to another unrelated feature struct, which is a "chain of feature requests" -- the vulkan C++ API provides a helper template vk::StructureChain to make this easier.
         // First step: we create a vk::StructureChain with 3 different feature structs, and for each different struct, we provide an initializer, assign them below with {}, seperating w/ comma
         vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
-            {},                               // vk::PhysicalDeviceFeatures2 (empty for now)
-            {.shaderDrawParameters = true},   // vk::PhysicalDeviceVulkan11Features - UNMENTIONED IN DOCS: needed for shader creation otherwise warning -- we're just enabling it (we query'd support in isDeviceSuitable)
+            { .features = {.samplerAnisotropy = true } },                               // vk::PhysicalDeviceFeatures2: anistropic filtering is an optional device feature, so we need to enable it ourselves (otherwise validation layer msg).
+            { .shaderDrawParameters = true},   // vk::PhysicalDeviceVulkan11Features - UNMENTIONED IN DOCS: needed for shader creation otherwise warning -- we're just enabling it (we query'd support in isDeviceSuitable)
             { .synchronization2 = true, .dynamicRendering = true},      // vk::PhysicalDeviceVulkan13Features - enable the 'dynamic rendering' feature from Vulkan 1.3
-            {.extendedDynamicState = true }   // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT - enable the 'extended dynamic state' feature from the extension struct
+            { .extendedDynamicState = true }   // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT - enable the 'extended dynamic state' feature from the extension struct
         }; // vk::StructureChain automatically connects these structs together by setting up the pNext pointer between them, so now we have one object containing all 3 structs and their requested extensions (even if they're unrelated to one another)!
         // As a result of them being chained together, when actually creating the logical device later, we just pass a pointer to the first structure in this chain, which will then trickle down to allow Vulkan seeing the other 2.
             // An added thing: the function expects PhysicalDeviceFeatures (base) to be FIRST in the chain, but the order of the other structs dont matter
@@ -1417,6 +1420,54 @@ class HelloTriangleApplication
 
 		return vk::raii::ImageView( logicalDevice, viewInfo );
 	}
+
+    // Sampler to read from the image view. So in total, it's like a chain:
+        // 1. createTextureImage creates the literal image, storing it in a GPU memory buffer
+        // 2. createTextureImageView creates the image view of the image to actually access it
+        // 3. createTextureSampler handles the sampling of an image view, to then finally return a final image.
+    void createTextureSampler()
+    {
+        // different GPUs have different .maxAnisotropys for anistropic filtering (where higher number = better quality), so if we want maximum quality, use the GPU's maximum supported anistropy.
+        vk::PhysicalDeviceProperties properties = physicalDevice.getProperties();
+
+        vk::SamplerCreateInfo samplerInfo {
+            // Filters can either be eLinear or eNearest -- eLinear is neighbouring 4 closest texels, whereas eNearest is a single neighbouring texel.
+            .magFilter = vk::Filter::eLinear, // Specifies how to interpolate oversampled texels
+            .minFilter = vk::Filter::eLinear, // Specifies how to interpolate undersampled texels
+            // the addressing mode (transformations) is specified by axes U/V/W instead of X/Y/Z because it's a convention, but they're the same thing -- see BIG_NOTES
+            // For this application, we're not sampling (taking) texels outside of the image, so eRepeat is arbitrary here, but it's handy to know because they're often used for repeated textures, like tiles/walls/floors, etc.
+            .addressModeU = vk::SamplerAddressMode::eRepeat,
+            .addressModeV = vk::SamplerAddressMode::eRepeat,
+            .addressModeW = vk::SamplerAddressMode::eRepeat,
+
+            .anisotropyEnable = vk::True, // whether or not we're going to be using anistropic filtering
+            .maxAnisotropy = properties.limits.maxSamplerAnisotropy, // see vk::PhysicalDeviceProperties properties comment: this is just the maximum anistropy for anistropic filtering.
+
+            .compareEnable = vk::False, // enables "comparison mode": if enabled, texels are compared to a value, and the result of that comparison is used in filtering operations. Elaborated later.
+            .compareOp = vk::CompareOp::eAlways, // NOT EXPLAINED IN TUTORIAL: "value specifying the comparison operator to apply to fetched data before filtering". I suppose elaborated later (apparently shadow maps / depth buffers?)
+
+            // Specifies what colour is returned when sampling beyond the image (related to addressing mode -- see big_notes) -- you can return black, white, or transparent, but you can't specify any arbitrary colour.
+            .borderColor = vk::BorderColor::eIntOpaqueBlack,
+
+            // Specifies what coordinate system we want: either we want normalized coordinates, or not.
+            // if vkTrue, we use coordinates within the range of 0 to imageWidth as X, or 0 to imageHeight as Y.
+            // if vkFalse, texels are coordinated with a range of 0 to 1 on all axes.
+            // Real-world applications use vkFalse because normalized coordinates is flexible with varying resolutions with the exact same coordinates (0-1 is like a percentage of the axis)
+            .unnormalizedCoordinates = vk::False
+        };
+
+        // Elaborated in another chapter, but mipmapping is essentially another type of filter that can be applied.
+            // Only reason this isn't in directly initialized in the vkSamplerCreateInfo struct is because of stupid order, and the comment above applies to all of them, so I don't wanna retype the same thing.
+        samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+        samplerInfo.mipLodBias = 0.0f;
+        samplerInfo.minLod = 0.0f;
+        samplerInfo.maxLod = 0.0f;
+
+        textureSampler = vk::raii::Sampler( logicalDevice, samplerInfo );
+        // Unlike some objects, the textureSampler does not reference (or bind to) a specific vkImage (including vkImage) on creation.
+        // the sampler is a distinct, independent object that provides an interface to extract colours from any texture -- it defines how sampling works, but not what you sample from.
+        // As a result, it can be applied to any object you want, 1D/2D/3D, and reused for different images!
+    }
 
     // THE SAME IDEA AS SWAPCHAIN'S IMAGE VIEWS.
     void createTextureImageView()

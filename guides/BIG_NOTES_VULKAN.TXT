@@ -539,6 +539,36 @@ Try to experiment with this by creating a setupCommandBuffer that the helper fun
 It’s best to do this after the texture mapping works to check if the texture resources are still set up correctly.
 TLDR: COMBINE COMMAND BUFFERS INTO A CENTRAL ONE INSTEAD OF MAKING A BUNCH OF TEMPORARY, MINI COMMAND BUFFERS THAT ALL DO THEIR OWN RESPECTIVE THING
 
+
+It is possible for shaders to read directly from images, but it's not very common because it leads to it being potentially blocky.
+Usually, we use something called a 'sampler', which applies Filtering and Transformations to then compute the final colour per pixel:
+
+
+    Filtering
+For example, say you directly read from the shader and map each texel (pixel present on the image) to a fragment within the fragment shader, it can lead to this:
+    https://docs.vulkan.org/tutorial/latest/_images/images/texture_filtering.png (Example of Oversampling)
+    https://docs.vulkan.org/tutorial/latest/_images/images/anisotropic_filtering.png (Example of Undersampling)
+
+Samplers can be used to deal with OVERSAMPLING and UNDERSAMPLING, where they'll automatically do it for you.
+Oversampling is where you have more fragments than texels, whereas Undersampling is where you have more texels than fragments
+    Oversampling is solved through calculating a final colour by combining multiple adjacent texels into one fragment.
+    Undersampling is solved through anisotropic filtering.
+
+    Transformations
+Aside from filters, Samplers also can perform transformations, which determines what happens when you try to read texels outside the image through its 'addressing mode'
+    https://docs.vulkan.org/tutorial/latest/_images/images/texture_addressing.png (Example of Transformations)
+
+    VK_SAMPLER_ADDRESS_MODE_REPEAT: Repeat the texture when going beyond the image dimensions.
+    VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT: Like repeat, but inverts the coordinates to mirror the image when going beyond the dimensions.
+    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE: Take the color of the edge closest to the coordinate beyond the image dimensions.
+    VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE: Like clamp to edge, but instead uses the edge opposite to the closest edge.
+    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER: Return a solid color when sampling beyond the dimensions of the image.
+
+Due to anistropic filtering being an optional device feature, check if the GPU supports it and enable it within our application as w/ all the other features/extensions.
+Additionally, you could also just disable anistropic filtering, but whatever who cares:
+    samplerInfo.anisotropyEnable = VK_FALSE; (yeah)
+    samplerInfo.maxAnisotropy = 1.0f;
+
 ----
 old garbage code:
     void createSwapChainImageViews()
