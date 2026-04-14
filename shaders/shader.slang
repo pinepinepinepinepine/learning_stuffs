@@ -77,8 +77,8 @@ float4 fragMain(VertexOutput inVert) : SV_Target // SV_Target specifies the inde
     // return float4(color, 1.0); // in this context, float4 (as opposed to output.sv_position=float4) is the base RGB colors (color as the first param) and the alpha channel (transparency) as 'w' (range: 1.0 = opaque, 0.0 = fully transparent)
 
     // this fragment's colour is equal to the texel's colour at fragmentTextureCoords
-    // return texture.Sample(inVert.fragmentTextureCoords);
+    return texture.Sample(inVert.fragmentTextureCoords);
 
     // texture colours are manipulated using the vertex colors
-    return float4( inVert.color * texture.Sample(inVert.fragmentTextureCoords).rgb, 1.0f);
+    //return float4( inVert.color * texture.Sample(inVert.fragmentTextureCoords).rgb, 1.0f);
 }

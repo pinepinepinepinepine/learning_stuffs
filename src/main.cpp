@@ -1524,7 +1524,7 @@ class HelloTriangleApplication
         // fourth param: the number of colour channels this image uses
         // fifth param: forces the image to be loaded in a certain way: in our case, force it to load w/ an RGB and alpha channel (even if it doesn't have one -- just for consistency)
         // the return is a pointer to the first element in an array of pixel values: the pixels are laid out row by row with 4 bytes per pixel (if specified w/ STBI_rgb_alpha )
-        stbi_uc* pixels = stbi_load( "../textures/fatfatmillycat.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha );
+        stbi_uc* pixels = stbi_load( "../textures/fatfatmillycatZOOM.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha );
 
         // calculates the byte size of the image. just get the area (width x height), and multiply by bytes per pixel (4 in our case due to STBI_rgb_alpha)
         vk::DeviceSize imageSize = texWidth * texHeight * 4;
