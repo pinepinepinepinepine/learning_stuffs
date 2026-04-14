@@ -880,10 +880,24 @@ class HelloTriangleApplication
             nullptr // The .pImmutableSamplers field is only relevant for image sampling related descriptors -- elaborated upon later.
         );
 
+        // We're making another descriptor within this descriptor set layout to contain our sampler descriptor!
+        vk::DescriptorSetLayoutBinding samplerLayoutBinding(
+            1, // The index of this descriptor (it's 1 because 0 is occupied by the uniform buffer)
+            vk::DescriptorType::eCombinedImageSampler, // the descriptor type (we're making a combined image sampler -- see big_notes!)
+            1, // we're only linking one resource within this descriptor
+            vk::ShaderStageFlagBits::eFragment, // we're using the combined image sampler descriptor within the fragment shader (it's where the colour of the fragment'll be determined)
+            nullptr
+        );
+
+        // just an array of bindings (reminder a descriptor set layout can contain multiple descriptor bindings): fun fact though, apparently it can deduce the type and size from the initializer list ever since C++17
+        // pre-17, though, just std::array<vk::DescriptorSetLayoutBinding, 2>
+        std::array descriptorBindings { uboLayoutBinding, samplerLayoutBinding };
+
+
         // See big notes: Descriptor Set Layout specifies the resources that'll be accessible by containing multiple binding slots (DescriptorSetLayoutBinding) -- it's essentially a container of the individual bindings
         vk::DescriptorSetLayoutCreateInfo layoutInfo {
-            .bindingCount = 1,              // the number of vk::DescriptorSetLayoutBindings within this Descriptor Set Layout
-            .pBindings = &uboLayoutBinding  // the DescriptorSetLayoutBindings themselves (which can contain an array of bindings -- .pBindings is a container/array)
+            .bindingCount = static_cast<uint32_t>( descriptorBindings.size() ), // the number of vk::DescriptorSetLayoutBindings within this Descriptor Set Layout (.bindingsCount is a uint32_t, .size() returns size_t)
+            .pBindings = descriptorBindings.data() // the DescriptorSetLayoutBindings themselves (which can contain an array of bindings -- .pBindings is a container/array)
         };
 
         // As with a bunch of other Vulkan objects, use the create info and the device to actually create the vk::raii::DescriptorSetLayout object.
@@ -894,17 +908,22 @@ class HelloTriangleApplication
     {
         // First parameter specifies the type of descriptors we want in this pool
         // Second parameter specifies the number of descriptors we want in this pool.
-        vk::DescriptorPoolSize poolSize(vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT);
+        vk::DescriptorPoolSize uboPoolSize( vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT );
+        vk::DescriptorPoolSize samplerPoolSize( vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT );
+
+        std::array total_poolSize { uboPoolSize, samplerPoolSize };
+        // whenever we call vkAllocateDescriptorSets to allocate the descriptor sets, sometimes we might run out of memory if we fuck up, but sometimes the driver'll automatically fix it for us
+        // however sometimes it doesn't do this, and validation layers will NOT catch this and print it out... so just be mindful as it can work on some machines, but not on others -- just don't fuck up to begin with
+        // some new vulkan update also eliminates the need to specify .descriptorCount for creation of the descriptor pool, but it's best practice to do so, so just include it.
 
         vk::DescriptorPoolCreateInfo poolInfo {
             .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, // Flags to give to the pool: eFreeDescriptorSet means we can "free" (delete) descriptors individually instead of having to free the whole pool. We don't use this, so you can also just leave this at 0, but whatever.
-            .maxSets = MAX_FRAMES_IN_FLIGHT, // the maximum number of descriptors that can be allocated from this pool
-            .poolSizeCount = 1, // the number of pool sizes we're using
-            .pPoolSizes = &poolSize // the pool size themselves
+            .maxSets = MAX_FRAMES_IN_FLIGHT, // the maximum number of descriptor >SETS< that can be allocated from this pool (we do NOT need to change this even w/ the inclusion of samplerPoolSize because each SET contains BOTH ubo and sampler descriptors -- we don't need 6, 3 is fine because for every descriptor set there's a UBO + sampler)
+            .poolSizeCount = static_cast<uint32_t>( total_poolSize.size() ), // the number of pool sizes we're using (.poolSizeCount is a uint32_t, .size() returns size_t)
+            .pPoolSizes = total_poolSize.data() // the pool size themselves
         };
 
         descriptorPool = vk::raii::DescriptorPool( logicalDevice, poolInfo );
-
     }
 
     void createDescriptorSets()
@@ -926,31 +945,49 @@ class HelloTriangleApplication
         // The descriptors (resources) need to be actually created for every set, so iterate over the descriptor sets to populate them with actual resources/data (descriptors)
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            vk::DescriptorBufferInfo bufferInfo {
+            vk::DescriptorBufferInfo uboBufferInfo {
                 .buffer = uniformBuffers[i], // what uniform buffer will be referenced through this descriptor set
                 .offset = 0, // the beginning of the buffer in memory.
                 .range = sizeof(UniformBufferObject) // range is the byte region in memory: we want the whole uniform buffer, hence the byte size of a UniformBufferObject
             };
 
-            vk::WriteDescriptorSet descriptorWrite {
+            // same gimmick as w/ the uboBufferInfo creation, but for sampler descriptors.
+            vk::DescriptorImageInfo samplerInfo {
+                .sampler = textureSampler, // the resource itself
+                .imageView = textureImageView, // what texture image view itself
+                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal // what layout the underlying texture vkImage is using
+            };
+
+            vk::WriteDescriptorSet uboDescriptorWrite {
                 .dstSet = descriptorSets[i], // the descriptor set we're updating
                 .dstBinding = 0, // the binding of the resource -- we set the uniform buffer to 0 through vk::DescriptorSetLayoutBinding::binding
                 .dstArrayElement = 0, // resources (descriptors) can be an array, so here we're specifying the first index in the array to update. we're not using an array, hence 0, aka first one.
                 .descriptorCount = 1, // how many descriptors (resource) to update.
                 .descriptorType = vk::DescriptorType::eUniformBuffer, // we're specifying the descriptor (resource) type again.
-                .pBufferInfo = &bufferInfo // the information of the descriptor (resource)'s buffer.
+                .pBufferInfo = &uboBufferInfo // the information of the descriptor (resource)'s buffer.
             };
             // The pBufferInfo field is used for descriptors that refer to buffer data,
             // pImageInfo is used for descriptors that refer to image data,
             // and pTexelBufferView is used for descriptors that refer to buffer views. Our descriptor is based on buffers, so we’re using pBufferInfo
 
+            // same logic as above but for a sampler descriptor.
+            vk::WriteDescriptorSet samplerDescriptorWrite {
+                .dstSet = descriptorSets[i],
+                .dstBinding = 1, // remember: this descriptor layout binding is 1 as specified in createDescriptorSetLayout()
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eCombinedImageSampler, // and of course what the descriptor type will be
+                .pImageInfo = &samplerInfo // and the sampler descriptor (resource) itself.
+            }; // the only notable thing compared to uboDescriptorWrite is that we use .pImageInfo for sampler descriptors instead of .pBufferInfo.
+
+            // and again as with the other two descriptor functions, put it into an array and then update it (or create it w/ the other ones) below.
+            std::array descriptorWrites { uboDescriptorWrite, samplerDescriptorWrite };
+
             // first param: describes what to update (so, we're updating the information above)
             // second param is to copy discriptors to each other, which we're not doing.
             // updateDescriptorSet now formally ties the descriptor (resource) to this descriptor set: in our case, the descriptor set is now referencing the uniform buffer.
-            logicalDevice.updateDescriptorSets( descriptorWrite, {} );
-
+            logicalDevice.updateDescriptorSets( descriptorWrites, {} );
         }
-
     }
 
 
@@ -1268,7 +1305,7 @@ class HelloTriangleApplication
 
 
         // Then we're setting up the image's color (color attachment)
-        vk::ClearValue clearColor = vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f); // A clearColor is what the color attachment (the color of the image view, this is pixel-by-pixel) is cleared to (filled fully with) -- 1.0f means opaque black.
+        vk::ClearValue clearColor = vk::ClearColorValue( (199/255.0f), (160/255.0f), (148/255.0f), 1.0f); // A clearColor is what the color attachment (the color of the image view, this is pixel-by-pixel) is cleared to (filled fully with) -- 1.0f means opaque black.
         vk::RenderingAttachmentInfo attachmentInfo {
             .imageView   = swapChainImageViews[ swapChain_imageIndex ], // what image view we're rendering to
             .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,    // the image layout the image will be in during rendering.
@@ -1672,7 +1709,7 @@ class HelloTriangleApplication
 
 
         // The glm::rotate function takes an existing transformation, rotation angle and rotation axis as parameters -- returns the model transformation matrix.
-        ubo.model = rotate( glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f) );
+        ubo.model = rotate( glm::mat4(1.0f), time * glm::radians(140.0f), glm::vec3(0.0f, 0.0f, 1.0f) );
         // first param: glm::mat4, is a 4x4 matrix; input sets the diagonals of the matrix to the inputted value: 1.0f means it's 1 on the diagonal, therefore it's an identity matrix.
         // second param: glm::radians() converts the input to radians, where the input is in degrees.
         // third parameter: specifies where to rotate around: since Z is 1.0, it means to rotate around the Z axis.
@@ -1687,7 +1724,7 @@ class HelloTriangleApplication
         */
 
         // The glm::lookAt function takes the eye position, center position and up axis as parameters.
-        ubo.view = lookAt( glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) );
+        ubo.view = lookAt( glm::vec3(0.0f, 2.0f, 3.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) );
         // first param, .eye: where the eye position will be (so our camera is at 2x, 2y, 2z)
         // second param, .center: the point where the camera is looking at (our camera is facing 0x/0y/0z)
         // third param, .up, 'THE UP VECTOR': confusing, but "UP" is Z positive (NOT Y FOR SOME REASON WITH GLM) -- Typically (0x, 0y, 1z)

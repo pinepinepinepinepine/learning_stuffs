@@ -597,3 +597,15 @@ old garbage code:
 // IF YOU WANT, ME, LET createSwapChainImageViews() (STRICTLY ONLY FOR SWAP CHAIN) use this function TOO! ANNOYING!
 // just as a little reminder, the original tutorial doesn't use raii. IT'S THE SAME THING. just i don't know. documentation with raii is fucking annoying.
 ---
+
+'Combined Image Samplers' are a different kind of descriptor (resource to communicate with the pipeline -- we've seen uniform buffers previously as a kind of descriptor):
+this kind of descriptor makes it possible for shaders to access an image resource through a normal sampler object
+
+There's also two other kinds of sampler descriptors aside from the combined one (VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER):
+1. VK_DESCRIPTOR_TYPE_SAMPLER: which contains the sampler object only (does not contain ANY kinds of image data -- literally just the rules of the sampler)
+2. VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE: which contains the image data only (NOT the sampled pixel data, it LITERALLY is just the raw image data)
+3. VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER: which is a combination of the two, so it contains the rules of the sampler and the raw image data
+
+It's important to note that these descriptors don't contain the sampled + filtered pixel data: the filtering occurs within the pipeline, so we can't pre-compute it with CPU code (including descriptors).
+When you would use the seperate descriptors (not the combined out) is when you want to interchange different images or samplers instead of having to make a whole new combined sampler descriptor.
+    This also means it's completely pointless in our application (at this point) to make separate sampler descriptors because we've ONE image and ONE sampler... so why separate them?

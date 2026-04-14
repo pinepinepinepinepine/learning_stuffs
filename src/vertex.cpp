@@ -15,6 +15,9 @@ struct Vertex
     glm::vec2 pos; // position of the vertex (duh)
     glm::vec3 color; // colour of the vertex (duh)
 
+    // Often called "uv coordinates", this is the actual texture coordinates for each vertex: the texture coordinates determine how the texture is actually mapped to geometry
+    glm::vec2 textureCoords;
+
     // We need to tell Vulkan how to pass this vertex's data to the vertex shader once it's uploaded into GPU memory. We need two structs in total to do this.
 
     // The first struct, vk::VertexInputBindingDescription, (Binding Descriptions) describes how to load data from memory (pointer arithmetic) throughout the vertices' container.
@@ -32,7 +35,7 @@ struct Vertex
 
     // The second struct, vk::VertexInputAttributeDescription, (Attribute Descriptions) describes how to extract a vertex's attributes from a chunk of vertex data that comes from the binding description above.
     // All it does is allow the GPU to process the colour and position of vertices -- otherwise, what is a vertex's position and color to the GPU? It's an array of size 2 because we've 2 attributes, so each element in the array corresponds to a different attribute.
-    static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDescriptions()
+    static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions()
     {
         // .location is where to send this attribute in the vertex shader -- ensure each attribute has a unique value as otherwise Vulkan won't be able to know where to send each attribute to
         // .binding tells Vulkan where we start our attribute chain (if it's 1, we're skipping the element at 0)
@@ -48,9 +51,13 @@ struct Vertex
             // offsetof() just returns where a member begins inside an aggregate -- finds where member variable (2nd param) begins inside a struct (1st param) in bytes.
 
         vk::VertexInputAttributeDescription position_description    { .location = 0, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof( Vertex, pos ) };
-        vk::VertexInputAttributeDescription color_description       { .location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof(Vertex, color) };
+        vk::VertexInputAttributeDescription color_description       { .location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof( Vertex, color ) };
 
-        return { position_description, color_description };
+        // huzzah! later added due to image sampling and projecting textures onto our swap chain images (our rectangle).
+        // same logic as the previous ones for its parameters, we're just passing the texture coordinates so that our shader can actually use it.
+        vk::VertexInputAttributeDescription texture_coords_description { .location = 2, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof( Vertex, textureCoords ) };
+
+        return { position_description, color_description, texture_coords_description };
     }
 
 };
@@ -58,11 +65,14 @@ struct Vertex
 // Previously we just hard-coded the vertices' positions within shader.slang, but now we're combining vertices into a single vector.
 // This is called interleaving vertex attributes.
 const std::vector<Vertex> vertices {
-    { { -0.5f, -0.5f  }, rgb_float( { 134, 181, 242 } ) },
-    { {  0.5f, -0.5f  }, rgb_float( { 79, 76, 237 } ) },
-    { {  0.5f,  0.5f  }, rgb_float( { 166, 127, 245 } ) },
-    { { -0.5f,  0.5f  }, rgb_float( { 124, 88, 196 } ) }
+    { { -0.5f, -0.5f  }, rgb_float( { 134, 181, 242 } ), { 1.0f, 0.0f } },
+    { {  0.5f, -0.5f  }, rgb_float( { 79,  76,  237 } ), { 0.0f, 0.0f } },
+    { {  0.5f,  0.5f  }, rgb_float( { 166, 127, 245 } ), { 0.0f, 1.0f } },
+    { { -0.5f,  0.5f  }, rgb_float( { 124, 88,  196 } ), { 1.0f, 1.0f } }
 };
+// for the third member, textureCoords, notice how it's from a range of 0-1. This is because of .unnormalizedCoordinates = vk::False.
+    // 1.0fx, 1.0fy is bottom right corner, where 0.0x, 0.0y is the top left corner.
+    // Coordinates below 0, or above 1, results in seeing the addressing modes in action due to trying to read a texel out of the image's extent
 
 // represents the index buffer's indices -- the specified indices'll be used to make a rectangle
 const std::vector<uint16_t> indices = {

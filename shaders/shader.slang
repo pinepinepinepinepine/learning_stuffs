@@ -29,11 +29,13 @@ ConstantBuffer<UniformBuffer> ubo;
 struct VertexInput {
     float2 inPosition;
     float3 inColor;
+    float2 inTextureCoords; // for our presenting of a texture image
 };
 
 struct VertexOutput {
     float3 color; // float3, in this context, isn't xyz position, it's just RGB.
     float4 sv_position : SV_Position; // 'SV_Position' (not the member variable) tells the GPU this sv_position variable is for the vertex's position.
+    float2 fragmentTextureCoords;
 };
 
 // This function is called upon for EVERY vertex. Calculates the position and per-vector data, like color.
@@ -60,13 +62,23 @@ VertexOutput vertMain( VertexInput input )
     // https://docs.vulkan.org/spec/latest/chapters/interfaces.html#interfaces-resources-layout
 
     output.color = input.inColor;
+
+    output.fragmentTextureCoords = input.inTextureCoords;
+
     return output;
 }
 
+Sampler2D texture; // A sampler represents a combined image sampler descriptor in Slang -- there's also an equivalent sampler1D and sampler3D for other types of images.
 // This function is called upon for EVERY fragment (similarly to how vertMain is called upon for EVERY vertex)
 [shader("fragment")] // Identifies the function as a Fragment Shader; if left out, the GPU won't know what function to call upon to act as the Fragment Shader.
 float4 fragMain(VertexOutput inVert) : SV_Target // SV_Target specifies the index of the specific framebuffer we're outputting/displaying to.
 {
-    float3 color = inVert.color; // GPU automatically sets inVert.color, hence why we randomly have a gradient: https://community.khronos.org/t/how-does-one-interpolate-opengl-colors-yourself/75403 (specify nointerpolation for the struct here if we dont want)
-    return float4(color, 1.0); // in this context, float4 (as opposed to output.sv_position=float4) is the base RGB colors (color as the first param) and the alpha channel (transparency) as 'w' (range: 1.0 = opaque, 0.0 = fully transparent)
+    // float3 color = inVert.color; // GPU automatically sets inVert.color, hence why we randomly have a gradient: https://community.khronos.org/t/how-does-one-interpolate-opengl-colors-yourself/75403 (specify nointerpolation for the struct here if we dont want)
+    // return float4(color, 1.0); // in this context, float4 (as opposed to output.sv_position=float4) is the base RGB colors (color as the first param) and the alpha channel (transparency) as 'w' (range: 1.0 = opaque, 0.0 = fully transparent)
+
+    // this fragment's colour is equal to the texel's colour at fragmentTextureCoords
+    // return texture.Sample(inVert.fragmentTextureCoords);
+
+    // texture colours are manipulated using the vertex colors
+    return float4( inVert.color * texture.Sample(inVert.fragmentTextureCoords).rgb, 1.0f);
 }
