@@ -12,7 +12,7 @@ struct UniformBufferObject {
 
 struct Vertex
 {
-    glm::vec2 pos; // position of the vertex (duh)
+    glm::vec3 pos; // position of the vertex (duh) -- now 3D w/ the addition of depth buffering
     glm::vec3 color; // colour of the vertex (duh)
 
     // Often called "uv coordinates", this is the actual texture coordinates for each vertex: the texture coordinates determine how the texture is actually mapped to geometry
@@ -50,7 +50,7 @@ struct Vertex
                 // remember .format specifies the size as well, which means it knows how many bytes to read from the offset.
             // offsetof() just returns where a member begins inside an aggregate -- finds where member variable (2nd param) begins inside a struct (1st param) in bytes.
 
-        vk::VertexInputAttributeDescription position_description    { .location = 0, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof( Vertex, pos ) };
+        vk::VertexInputAttributeDescription position_description    { .location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof( Vertex, pos ) }; // with the addition of depth buffering, change the format to include a Z axis (remember the colour thing)
         vk::VertexInputAttributeDescription color_description       { .location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof( Vertex, color ) };
 
         // huzzah! later added due to image sampling and projecting textures onto our swap chain images (our rectangle).
@@ -65,10 +65,15 @@ struct Vertex
 // Previously we just hard-coded the vertices' positions within shader.slang, but now we're combining vertices into a single vector.
 // This is called interleaving vertex attributes.
 const std::vector<Vertex> vertices {
-    { { -0.5f, -0.5f  }, rgb_float( { 134, 181, 242 } ), { 1.0f, 0.0f } },
-    { {  0.5f, -0.5f  }, rgb_float( { 79,  76,  237 } ), { 0.0f, 0.0f } },
-    { {  0.5f,  0.5f  }, rgb_float( { 166, 127, 245 } ), { 0.0f, 1.0f } },
-    { { -0.5f,  0.5f  }, rgb_float( { 124, 88,  196 } ), { 1.0f, 1.0f } }
+    { { -0.5f, -0.5f, 0.0f }, rgb_float( { 134, 181, 242 } ), { 1.0f, 0.0f } },
+    { {  0.5f, -0.5f, 0.0f }, rgb_float( { 79,  76,  237 } ), { 0.0f, 0.0f } },
+    { {  0.5f,  0.5f, 0.0f }, rgb_float( { 166, 127, 245 } ), { 0.0f, 1.0f } },
+    { { -0.5f,  0.5f, 0.0f }, rgb_float( { 124, 88,  196 } ), { 1.0f, 1.0f } },
+
+    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+    {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
 };
 // for the third member, textureCoords, notice how it's from a range of 0-1. This is because of .unnormalizedCoordinates = vk::False.
     // 1.0fx, 1.0fy is bottom right corner, where 0.0x, 0.0y is the top left corner.
@@ -79,5 +84,6 @@ const std::vector<uint16_t> indices = {
     // also, the GPU will make triangles (or whatever topology we specified) in sequential order, so:
     // the first 3 vertices make the first triangle; then the last 3 make the second triangle
     // (so it draws index 0 -> 1 -> 2 -> triangle one -> 2 -> 3 -> 0 -> triangle two)
-    0, 1, 2, 2, 3, 0
+    0, 1, 2, 2, 3, 0,
+    4, 5, 6, 6, 7, 4
 };

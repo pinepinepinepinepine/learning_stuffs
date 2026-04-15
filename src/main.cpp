@@ -120,8 +120,12 @@ class HelloTriangleApplication
     // it's faster this way, and cleaner -- pixels within an image object are known as "texels".
     VkImage textureImage = nullptr;
     vk::raii::DeviceMemory textureImageMemory = nullptr;
-
     vk::raii::ImageView textureImageView = nullptr; // image view, same logic as w/ the swap chain image views
+
+    // the same trifecta of resources (BUT! to create a DEPTH BUFFER! -- createDepthResources()): the image, image memory, and the image view. same logic as the previous couple mentions.
+    VkImage depthImage = nullptr;
+    vk::raii::DeviceMemory depthImageMemory = nullptr;
+    vk::raii::ImageView depthImageView = nullptr;
 
     vk::raii::Sampler textureSampler = nullptr; // the texture sampler: see big_notes, but in order to get a final texture, you sample it (applying filtering and transformations) from the texture image view.
 
@@ -194,6 +198,9 @@ class HelloTriangleApplication
         createGraphicsPipeline(); // For an explanation of the graphics pipeline, see BIG_NOTES
 
         createCommandPool(); // see function for elaboration
+
+
+        createDepthResources(); // create the resources for our depth buffer
 
         createTextureImage();
         createTextureImageView();
@@ -601,13 +608,21 @@ class HelloTriangleApplication
 
         for ( auto &swapChainImage : swapChainImages )
         {
-            swapChainImageViews.emplace_back( createImageView( swapChainImage, swapChain_surfaceFormat.format ) );
+            swapChainImageViews.emplace_back( createImageView( swapChainImage, swapChain_surfaceFormat.format, vk::ImageAspectFlagBits::eColor ) );
         }
     }
 
     // A function that ensures the swap chain and its image views are destroyed before re-creating them.
     void cleanupSwapChain()
     {
+        // depthImage isn't raii. We have to delete it ourselves.
+            // UNLIKE TEXTUREIMAGE, we have to destroy depthImage each time before the call to createImage() occurs onto depthImage
+            // this is because the old instance doesn't get destroyed and thus causes a memory leak.
+            // So, just delete it each time within swap chain clean up as this function gets called prior to createImage in createDepthResources.
+            // The lesson: delete the old resource whenever recreating the same resource.
+                // https://vulkan-tutorial.com/Depth_buffering
+        vkDestroyImage( *logicalDevice, depthImage, nullptr ); // this func also gets called on app exit -- we're fine.
+
         swapChainImageViews.clear();
         swapChain = nullptr;
     }
@@ -637,6 +652,9 @@ class HelloTriangleApplication
         createSwapChain();
         // As a result of changing the swap chain, we also need to change our image views as the image views are supposed to be referencing the current swap chain's images, not the old one.
         createSwapChainImageViews();
+
+        // the resolution of the depth buffer also needs to change whenever the window is resized, hence recreation:
+        createDepthResources();
 
         outputFile << get_current_time() << " | Finished the Recreation of the swap chain" << std::endl;
     }
@@ -1100,9 +1118,17 @@ class HelloTriangleApplication
         }; // we're revisiting this in another chapter.
 
 
-            // Depth and Stencil Testing (TO DO: ELABORATED UPON LATER, we're passing nullptr within the pipeline creation)
-        // this also discards fragments (two way filter process through this and rasterization)
-        // vk::PipelineDepthStencilStateCreateInfo;
+            // Depth and Stencil Testing (TO DO: ELABORATED UPON LATER [SCRATCH IT! NOW!], we are [WERE PREVIOUSLY] passing nullptr within the pipeline creation)
+        // this will also discard fragments (two way filter process through this and rasterization)
+        vk::PipelineDepthStencilStateCreateInfo depthStencil {
+            .depthTestEnable       = vk::True, // enables depth testing: specifies if the depth of new fragments should be compared to the current depth buffer to see if they should be discarded (due to being obscured)
+            .depthWriteEnable      = vk::True, // specifies if the new depth of fragments should actually be written to the depth buffer if they pass the depth test (otherwise, they remain unchanged)
+            .depthCompareOp        = vk::CompareOp::eLess, // specifes the comparison that is performed to keep or discard fragments
+                // we're sticking to the the convention of lower depth = closer, so the depth of new fragments should be less (if they have a higher value, it means they'd be behind something, so they should be discarded)
+            .depthBoundsTestEnable = vk::False, // specifies if we should only keep fragments that fall within the specified depth range of .minDepthBounds and .maxDepthBounds
+                // essentially, an added filter where fragments outside the specified depths values are discarded -- we disabled this because we're not using this functionality.
+            .stencilTestEnable     = vk::False // last three fields specify stencil buffer operations, which we're not doing YET. (make sure the image format contains a stencil component)
+        };
 
 
             // Colour Blending
@@ -1161,7 +1187,8 @@ class HelloTriangleApplication
 
         vk::PipelineRenderingCreateInfo renderingPipeline_CreateInfo {
             .colorAttachmentCount = 1,  // The number of color formats we're using
-            .pColorAttachmentFormats = &swapChain_surfaceFormat.format // the color formats
+            .pColorAttachmentFormats = &swapChain_surfaceFormat.format, // the color formats
+            .depthAttachmentFormat = findDepthFormat() // the depth format we're using
         };
 
         vk::GraphicsPipelineCreateInfo graphicsPipeline_CreateInfo {
@@ -1172,6 +1199,7 @@ class HelloTriangleApplication
         .pViewportState      = &viewportState,
         .pRasterizationState = &rasterizer,
         .pMultisampleState   = &multisampling,
+        .pDepthStencilState  = &depthStencil, // update due to adding depth buffers to the pipeline! we're in 3D! yay!
         .pColorBlendState    = &colorBlending,
         .pDynamicState       = &dynamicState,
         .layout              = pipelineLayout, // currently empty, elaborated upon later (.layout receives a handle, not a struct pointer)
@@ -1278,7 +1306,7 @@ class HelloTriangleApplication
         commandBuffers = vk::raii::CommandBuffers( logicalDevice, commandBuffer_allocationInfo );
     }
 
-    // recordCommandBuffer() will write (record) the commands that we want to contain inside a command buffer.
+    // recordCommandBuffer() will write (known as record) the commands that we want to contain inside a command buffer.
         // We'll use the commandBuffer that we want to contain the command, and the index of the current swap chain image that we want to write/draw to.
     void recordCommandBuffer( uint32_t swapChain_imageIndex )
     {
@@ -1293,36 +1321,70 @@ class HelloTriangleApplication
         commandBuffers[wait_frameIndex].begin({}); // tutorial mistakenly uses operator-> but ok... we'll use operator. This signals the start of the command buffer's commands.
             // vk::raii::CommandBuffer::begin() implicitly resets the already existing commands inside the command buffer, if we've already recorded a command once.
 
-
+        // Before starting rendering, transition the swapchain image to COLOR_ATTACHMENT_OPTIMAL
         transition_image_layout (
-            swapChain_imageIndex, vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal, // We are now transitioning the swapChain's image (swapChain_imageIndex) to go from eUndefined (no previous layout) -> eColorAttachmentOptimal (where eColorAttachmentOptimal is optimal for rendering)
+            swapChainImages[swapChain_imageIndex], vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal, // We are now transitioning the swapChain's image (swapChain_imageIndex) to go from eUndefined (no previous layout) -> eColorAttachmentOptimal (where eColorAttachmentOptimal is optimal for rendering)
             {}, vk::AccessFlagBits2::eColorAttachmentWrite, // Bitmasks that define what access rights: our old image (SOURCE) format's access right is empty because it's eUndefined,
             // but our new image (DESTINATION) format has vk::AccessFlagBits2::eColorAttachmentWrite, which grants permissions to specify pixel data into this image (again, specified by swapChain_imageIndex).
-            vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::PipelineStageFlagBits2::eColorAttachmentOutput
+            vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::PipelineStageFlagBits2::eColorAttachmentOutput,
             // the specified old (src - param one) image's stage must've finished before beginning the new desination's (param two) specified stage (vk::PipelineStageFlagBits2::eColorAttachmentOutput)
                 // the old stage is EMPTY because we've not made an image layout yet, so it's a little misleading -- it's considered finished so it's kinda redundant.
+            vk::ImageAspectFlagBits::eColor
+                // NEW WITH THE INCLUSION OF DEPTH: specify (instead of hard-coding) the image aspect, which means what kind of data pixels'll store (colour values, in our case)
         );
 
+        // same logic as with the transition_image_layout() call above (but w/ the depth image).
+        // HOWEVER. do notice we're transitioning the depthImage, NOT our swap chain image -- it's why we can call this subsequently after the previous call -- it's transitioning a different image!
+        transition_image_layout(
+            depthImage, // as a reminder: we don't need to pass by address/reference here because depthImage is just the handle, and so we're passing the handle value.
+            vk::ImageLayout::eUndefined, // the previous contents of this image are not guaranteed to be preserved -- we just don't care because we won't be doing anything w/ the prev data -- vulkan's free to discard the previous.
+            vk::ImageLayout::eDepthAttachmentOptimal,
+            vk::AccessFlagBits2::eDepthStencilAttachmentWrite, // allow our depth image to actually set depth values per fragment
+            vk::AccessFlagBits2::eDepthStencilAttachmentWrite, // (if we don't include this, we will not be able to change depth values, similar logic as previous call but with depth)
+            vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests, // kinda redundant, same logic as previous call
+            vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
+            vk::ImageAspectFlagBits::eDepth // again, what the pixel data'll be (depth)
+        );
 
         // Then we're setting up the image's color (color attachment)
         vk::ClearValue clearColor = vk::ClearColorValue( (199/255.0f), (160/255.0f), (148/255.0f), 1.0f); // A clearColor is what the color attachment (the color of the image view, this is pixel-by-pixel) is cleared to (filled fully with) -- 1.0f means opaque black.
-        vk::RenderingAttachmentInfo attachmentInfo {
+
+        // and then the image's depth (depth attachment) -- same logic as the above line, just with depth.
+        vk::ClearValue clearDepth = vk::ClearDepthStencilValue( 1.0f, 0 ); // again, clear means the image'll be 'filled fully with' (cleared is formal, but it's kinda weird)
+            // first parameter is the initial depth value of each pixel in the depth buffer. In turn, it should be the furthest possible depth, which is 1.0 -- therefore, by default, every pixel'll have an initial depth value of first parameter
+                // again, in Vulkan (check includes.hpp - GLM_FORCE_DEPTH_ZERO_TO_ONE), range of depths within the depth's image data is 0.0 to 1.0, where 1.0 is the far view plane (max depth value)
+            // second parameter is the same thing as w/ the first parameter, but instead of DEPTH values, it's STENCIL values. So, second param is the initial stencil value for each pixel. (NOT ELABORATED W/ THE TUTORIAL YET)
+
+        vk::RenderingAttachmentInfo colourAttachmentInfo {
             .imageView   = swapChainImageViews[ swapChain_imageIndex ], // what image view we're rendering to
             .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,    // the image layout the image will be in during rendering.
             .loadOp      = vk::AttachmentLoadOp::eClear,                // specifies what we'll do to our image BEFORE rendering (clearing it, which is filling it in fully)
             .storeOp     = vk::AttachmentStoreOp::eStore,               // what we'll do to the image AFTER rendering (we're just storing it for later use)
-            .clearValue  = clearColor                                   // the color used for the eClear operation (the screen will first be rendered fully opaque black)
+            .clearValue  = clearColor                                   // the color used for the eClear operation (the screen will first be rendered fully opaque black (previously)... NOW PINK!)
         };
 
+        // similarily w/ a bunch of other creation stuff that accept an std::array, we're specifying a specific rendering attachment information to feed it into a general "MOTHER" struct.
+            //(ctrl f it for some examples, but similarily to std::array descriptorWrites or std::array total_poolSize or std::array descriptorBindings )
+            // the only difference here is that the vk::RenderingInfo struct contains a separate .pDepthAttachments member instead of a general attachment member that'll accept a central, "MOTHER" array.
+        // Anyways, the same logic applies here as it does to colourAttachmentInfo, but just with depth instead of colour -- literally just replace the comment's mention of 'colour' to 'depth' and it'll be accurate.
+        vk::RenderingAttachmentInfo depthAttachmentInfo {
+            .imageView   = depthImageView,
+            .imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+            .loadOp      = vk::AttachmentLoadOp::eClear,
+            .storeOp     = vk::AttachmentStoreOp::eDontCare,
+            .clearValue  = clearDepth // reminder: doesn't VISUALLY change anything, just defaults all the pixels to a specified depth value
+        };
 
         vk::RenderingInfo renderingInfo {
             .renderArea = {                                 // this is what we actually render to inside of the specific image. (defines the size of the rendering rectangle/area)
                 .offset = { 0, 0 },                         // the first point of the rectangle (0,0 being upper top left)
                 .extent = swapChain_Extent_ImageResolution  // we're passing the image resolution here to specify the .extent (how far down and right it goes) -- we're covering the entirety of the swap chain's canvas
             },
-            .layerCount           = 1,                  // the number of layers within this image view we're rendering to (we only have one layer)
-            .colorAttachmentCount = 1,                  // the attachment count
-            .pColorAttachments    = &attachmentInfo     // the attachment data itself
+            .layerCount           = 1,                      // the number of layers within this image view we're rendering to (we only have one layer)
+            .colorAttachmentCount = 1,                      // the COLOUR attachment count (NOT DEPTH)
+            .pColorAttachments    = &colourAttachmentInfo,  // the COLOUR attachment data itself (NOT DEPTH)
+            .pDepthAttachment     = &depthAttachmentInfo    // the DEPTH attachment data itself
+                // this struct does NOT have something resembling .colorAttachmentCount but for depth; this is because we can only pass a SINGLE (or zero) depth (and stencil) attachment.
         };
 
         commandBuffers[wait_frameIndex].beginRendering( renderingInfo ); // actually begin rendering here
@@ -1383,16 +1445,89 @@ class HelloTriangleApplication
 
         // After rendering, transition the swapchain image to vk::ImageLayout::ePresentSrcKHR
         transition_image_layout(
-            swapChain_imageIndex,                                   // again, what image we're referring to.
+            swapChainImages[swapChain_imageIndex],                  // again, what image we're referring to.
             vk::ImageLayout::eColorAttachmentOptimal,               // transition this image layout from eColorAttachmentOptimal...
             vk::ImageLayout::ePresentSrcKHR,                        // to ePresentSrcKHR for presenting images to the screen.
             vk::AccessFlagBits2::eColorAttachmentWrite,             // the previous access rights
             {},                                                     // The destination (ePresentSrcKHR) doesn't need any access rights.
             vk::PipelineStageFlagBits2::eColorAttachmentOutput,     // the source's stage (finish this stage before transitioning to eBottomOfPipe)
-            vk::PipelineStageFlagBits2::eBottomOfPipe               // the desination's stage: the bottom of the pipe means the graphic pipeline has FULLY finished (NO MORE PIPELINE WORK).
+            vk::PipelineStageFlagBits2::eBottomOfPipe,              // the desination's stage: the bottom of the pipe means the graphic pipeline has FULLY finished (NO MORE PIPELINE WORK).
+            vk::ImageAspectFlagBits::eColor                     // NEW WITH THE INCLUSION OF DEPTH: specify (instead of hard-coding) the image aspect, which means what kind of data pixels'll store (colour values, in our case)
         );
 
         commandBuffers[wait_frameIndex].end(); // we've finished recording the command buffer: signal its end.
+    }
+
+    // function to find and pick a depth format that is supported by our graphics card.
+    vk::Format findSupportedFormat( const std::vector<vk::Format>& candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features )
+    {
+        for ( const auto format : candidates )
+        {
+            // physicalDevice.getFormatProperties( format ) gets the capabilities of a specified format (returned as 3 members which are a bitmask of flags)
+                // vk::FormatProperties struct contains three members which are bitmasks:
+                    // .linearTilingFeatures: Linear Tiling Features (operations) supported by the format
+                    // .optimalTilingFeatures: Optimal Tiling Features (operations) supported by the format
+                    // .bufferFeatures: buffer features supported by the format (not relevant here)
+            vk::FormatProperties props = physicalDevice.getFormatProperties( format );
+
+            // '( props.<linear/optimal>TilingFeatures & features ) == features' means we're requiring the format to support ALL inputted features, not just one.
+            // IF our physicalDevice does NOT support a specific format entirely, its tiling features bitmask won't have any enabled feature flags at all, so the bit check (operator&) will always fail
+            if ( tiling == vk::ImageTiling::eLinear && ( props.linearTilingFeatures & features ) == features )
+                return format;
+            if ( tiling == vk::ImageTiling::eOptimal && ( props.optimalTilingFeatures & features ) == features )
+                return format;
+        }
+
+        throw std::runtime_error("failed to find supported format!");
+    }
+
+    // Helper function to find whatever supported depth format, not terribly important.
+    vk::Format findDepthFormat()
+    {
+        vk::Format formats = findSupportedFormat(
+            { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint }, // Candiates: what kind of depth formats we'd like to use: first option is ideal, last is least ideal (fallbacks)
+            vk::ImageTiling::eOptimal, // if we'd prefer optimal/linear tiling.
+            vk::FormatFeatureFlagBits::eDepthStencilAttachment // what feature(s) we require -- param's a bitmask of flags
+        );
+
+        return formats;
+    }
+
+    // Helper function whose sole purpose is to tell whether or not it has a stencil component (S IN identifier)
+    // While we're not using the stencil components, we need to take it into account whenever performing layout transitions on images with these added stencil formats.
+    bool hasStencilComponent(vk::Format format)
+    {
+        return format == vk::Format::eD32SfloatS8Uint || format == vk::Format::eD24UnormS8Uint;
+    }
+
+    void createDepthResources()
+    {
+        // the depth image's format we'll be using
+        vk::Format depthFormat = findDepthFormat();
+
+        // HACK.
+        //vkDestroyImage(*logicalDevice, depthImage, nullptr);
+
+        // A depth image is an attachment (similarily to a color attachment) that contains a depth value for every pixel (fragment)
+            // the depth buffer is the depth image's memory (again, VERY similar to other calls to createImage -- it's the same thing, just for depth).
+        // I'm not re-explaining createImage's parameters, just check the other comments -- you should know by now, me.
+        createImage(
+            swapChain_Extent_ImageResolution.width,
+            swapChain_Extent_ImageResolution.height,
+            depthFormat, // the format will specify what the image data will contain
+            vk::ImageTiling::eOptimal,
+            vk::ImageUsageFlagBits::eDepthStencilAttachment, // and this will specify what we intend on using it
+            vk::MemoryPropertyFlagBits::eDeviceLocal, // memory type won't be communicating to the CPU (VERY likely, it's just a single property flag, but yeah), use a staging buffer if needed.
+            depthImage,
+            depthImageMemory
+        );
+
+        // and same logic as with all the other image objects: use a image view to access it instead of the raw vkimage.
+        depthImageView = createImageView( depthImage, depthFormat, vk::ImageAspectFlagBits::eDepth );
+            // only thing different here is that we're specifying eDepth as its aspectFlag instead of eColor (like w/ the texture image view)
+            // this is because we're making a depth image that'll store depth values, NOT colour data.
+                // for a visualization: https://en.wikipedia.org/wiki/Depth_map
+                    // NOTE: THE DEPTH IMAGE GENERATED WON'T BE BLACK/WHITE (by default), it LITERALLY just contains data per pixel, NOTHING visual, if you want to mimic the images on wikipedia, you'll have to assign colour based on depth values.
     }
 
     // This function is used to transition the image layout before and after rendering
@@ -1403,8 +1538,8 @@ class HelloTriangleApplication
             // see big_notes.
         // Not to mention it isn't included in this section's code at the bottom (though, in the next one, yes) -- just awful.
     // this is ONLY necessary in this context for dynamic rendering.
-    void transition_image_layout( uint32_t imageIndex, vk::ImageLayout old_layout, vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask,
-	    vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask, vk::PipelineStageFlags2 dst_stage_mask )
+    void transition_image_layout( const VkImage& image, vk::ImageLayout old_layout, vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask,
+	    vk::AccessFlags2 dst_access_mask, vk::PipelineStageFlags2 src_stage_mask, vk::PipelineStageFlags2 dst_stage_mask, vk::ImageAspectFlags image_aspect_flags )
     {
         // Specified a bit of the fields within the call to this in recordCommandBuffer()
         vk::ImageMemoryBarrier2 barrier = {
@@ -1416,9 +1551,9 @@ class HelloTriangleApplication
 		    .newLayout           = new_layout,
 		    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 		    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-		    .image               = swapChainImages[imageIndex],
+		    .image               = image,
 		    .subresourceRange    = {
-		        .aspectMask     = vk::ImageAspectFlagBits::eColor,
+		        .aspectMask     = image_aspect_flags,
 		        .baseMipLevel   = 0,
 		        .levelCount     = 1,
 		        .baseArrayLayer = 0,
@@ -1439,19 +1574,18 @@ class HelloTriangleApplication
         // For example, this can be used to make sure an image was written before it is read -- kinda like a semaphore.
         // In our case, we're using it to transition the Image's layout (vk::ImageLayout::eColorAttachmentOptimal, to, for instance, vk::ImageLayout::ePresentSrcKHR)
         // Another example: pipeline barriers can be used to transfer queue family ownership whenever using vk::SharingMode::eExclusive (so like changing the queue family for command buffers and swap chains)
-
     }
 
     // THE TUTORIAL DOESN'T WANNA CONVERT ALL THE RAII OBJECTS TO STANDARD, NON-RAII OBJECTS. ANNOYING.
     // IF YOU WANT, ME, LET createSwapChainImageViews() (STRICTLY ONLY FOR SWAP CHAIN) use this function TOO! ANNOYING!
     // just as a little reminder, the original tutorial doesn't use raii. IT'S THE SAME THING. just i don't know. documentation with raii is fucking annoying.
-    vk::raii::ImageView createImageView( const VkImage &image, vk::Format format )
+    vk::raii::ImageView createImageView( const VkImage &image, vk::Format format, vk::ImageAspectFlagBits aspectFlags ) // aspectFlag is now a parameter instead of hardcoded to vk::ImageAspectFlagBits::eColor -- it literally just represents what type of data it'll store (depth/colour, for example)
 	{
 		vk::ImageViewCreateInfo viewInfo {
 		    .image            = image, // the image we're making a view of
 		    .viewType         = vk::ImageViewType::e2D, // Specifies we're rending to a 2D screen. (:e3D is 3d; :e1D is 1d)
 		    .format           = format, // The color format
-		    .subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 } // Describe's the image's purpose and which part of the image should be accessed (we're specifying Color)
+		    .subresourceRange = { aspectFlags, 0, 1, 0, 1 } // Describes the image's purpose and which part of the image should be accessed (for example, we're specifying Color w/ vk::ImageAspectFlagBits::eColor)
         }; // There's also a .components field which mixes color channels around: imageViewCreateInfo.components = { vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity}; for an example (no clue)
         // Hypothetically, if we had vk::SwapchainCreateInfoKHR::imageArrayLayers above 1, we should make multiple image views for each different layer to access them individually -- the maximum amount of image views is generally 16.
 
@@ -1509,7 +1643,7 @@ class HelloTriangleApplication
     // THE SAME IDEA AS SWAPCHAIN'S IMAGE VIEWS.
     void createTextureImageView()
     {
-        textureImageView = createImageView( textureImage, vk::Format::eR8G8B8A8Srgb );
+        textureImageView = createImageView( textureImage, vk::Format::eR8G8B8A8Srgb, vk::ImageAspectFlagBits::eColor );
     }
 
     void createTextureImage()

@@ -609,3 +609,36 @@ There's also two other kinds of sampler descriptors aside from the combined one 
 It's important to note that these descriptors don't contain the sampled + filtered pixel data: the filtering occurs within the pipeline, so we can't pre-compute it with CPU code (including descriptors).
 When you would use the seperate descriptors (not the combined one) is when you want to interchange different images or samplers instead of having to make a whole new combined sampler descriptor.
     This also means it's completely pointless in our application (at this point) to make separate sampler descriptors because we've ONE image and ONE sampler... so why separate them?
+
+----
+https://docs.vulkan.org/tutorial/latest/07_Depth_buffering.html
+We added the third dimension to our vertices, but our problem is that our 4, 5, 6, 6, 7, 4 vertex indices are drawn second,
+so even when these vertices are SUPPOSED to be underneath the first draw (0, 1, 2, 2, 3, 0), it appears above the first, which is wrong.
+
+There's two ways to address this:
+1. Sort all the draw calls by depth from back to front (so it's not drawing in a hard-coded order -- literally iterate over the vertices by depth, which is an OKAY method, kinda tricky)
+2. Use depth testing with a depth buffer
+
+The first approach is commonly used for drawing transparent objects, because order-independent transparency is a difficult challenge to solve.
+However, the problem of ordering fragments by depth is much more commonly solved using a 'depth buffer' -- the second method.
+
+A depth buffer is an additional attachment that stores the depth of every pixel, similarily how the color attachment stores the color of every pixel.
+
+Whenever a fragment runs through the rasterizer stage in the pipeline, the initial depth test will check if the new fragment is closer than the previous one (meaning it checks whether or not the new fragment is obscured by the old fragment).
+    If it isn't closer than the previous fragment, then the new fragment is discarded as it's obscured.
+    If it IS closer than the previous fragment (it ISN'T OBSCURED), then the fragment will write its own depth into the depth buffer.
+        It is possible to manipulate this value from the fragment shader, just like how you can manipulate the color output.
+
+Creating a depth image is fairly straight-forward/similar to a bunch of other stuff we've made so far:
+    The resolution of the depth image should be the same resolution as the color attachment (which is defined by the swap chain extent image resolution object);
+    It's specified image usage should be appropriate for a depth attachment;
+    The optimal tiling (vk::ImageCreateInfo's .tiling member -- there's a comment detailing this within main.cpp), which specifies how data is laid out in GPU memory;
+    finally, the memory type.
+
+    And similarily to attachments/image views, we also have to specify what vkFormat to use, however, it MUST contain a Depth component;
+    indicated by D<XX> (the D stands for depth, and <XX> is the bit float). Some examples of depth formats are:
+        vk::Format::eD32Sfloat: 32-bit float for depth
+        vk::Format::eD32SfloatS8Uint: 32-bit signed float for depth (as well as 8 bit stencil component)
+        vk::Format::eD24UnormS8Uint: 24-bit float for depth (as well as 8 bit stencil component)
+            https://docs.vulkan.org/refpages/latest/refpages/source/VkFormat.html just ctrlF D and you'll see some more.
+            The stencil component is used for "Stencil Tests", which is elaborated upon later, but it's an additional test that can be added alongside the depth testing.

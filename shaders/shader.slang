@@ -27,7 +27,7 @@ ConstantBuffer<UniformBuffer> ubo;
     // (you know how when you're far away from an object, it's smaller? yeah. that thing. essentially it scales the size accordingly depending on distance to give the same illusion. future problem.)... keep it 1.0.
 
 struct VertexInput {
-    float2 inPosition;
+    float3 inPosition;
     float3 inColor;
     float2 inTextureCoords; // for our presenting of a texture image
 };
@@ -47,7 +47,7 @@ VertexOutput vertMain( VertexInput input )
 
     // SEE BIG_NOTES_MATH FOR A MUCH NEEDED ELABORATION. mul() just multiplies two matrices.
     // this ENTIRE line is JUST: ( projection * ( view * model ) ) -- SEE BIG_NOTES_MATH I BEG
-    output.sv_position = mul( ubo.proj, mul( ubo.view, mul( ubo.model, float4(input.inPosition, 0.0, 1.0) ) ) );
+    output.sv_position = mul( ubo.proj, mul( ubo.view, mul( ubo.model, float4( input.inPosition, 1.0 ) ) ) );
     // AFTER it executes, output.sv_position are coords in CLIP SPACE, and W will NOT guaranteed to be 1.0 because we're simulating DEPTH/FoV
     // w will used in perspective projection as the perspective division and is essential for making closer objects look larger than objects that are further away.
 
