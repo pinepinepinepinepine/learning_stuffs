@@ -1858,7 +1858,7 @@ class HelloTriangleApplication
         */
 
         // The glm::lookAt function takes the eye position, center position and up axis as parameters.
-        ubo.view = lookAt( glm::vec3(0.0f, 2.0f, 3.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) );
+        ubo.view = lookAt( glm::vec3(2.0f, 2.0f, 1.5f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) );
         // first param, .eye: where the eye position will be (so our camera is at 2x, 2y, 2z)
         // second param, .center: the point where the camera is looking at (our camera is facing 0x/0y/0z)
         // third param, .up, 'THE UP VECTOR': confusing, but "UP" is Z positive (NOT Y FOR SOME REASON WITH GLM) -- Typically (0x, 0y, 1z)

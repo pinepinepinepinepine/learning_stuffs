@@ -70,10 +70,22 @@ const std::vector<Vertex> vertices {
     { {  0.5f,  0.5f, 0.0f }, rgb_float( { 166, 127, 245 } ), { 0.0f, 1.0f } },
     { { -0.5f,  0.5f, 0.0f }, rgb_float( { 124, 88,  196 } ), { 1.0f, 1.0f } },
 
+
+    // annoying to format these nicely
     {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
     {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
     {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-    {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
+    {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+
+    {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f}}, // 8
+    {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}}, // 9
+    {{ -0.5f, -0.5f, 0.0f }, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}}, // 10
+    {{  0.5f, -0.5f, 0.0f }, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}}, // 11
+
+    {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}}, // 12
+    {{-0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}}, // 13
+    {{0.5f, 0.5f, 0.0f }, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}}, // 14
+    {{-0.5f,  0.5f, 0.0f }, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}}, // 15
 };
 // for the third member, textureCoords, notice how it's from a range of 0-1. This is because of .unnormalizedCoordinates = vk::False.
     // 1.0fx, 1.0fy is bottom right corner, where 0.0x, 0.0y is the top left corner.
@@ -84,6 +96,11 @@ const std::vector<uint16_t> indices = {
     // also, the GPU will make triangles (or whatever topology we specified) in sequential order, so:
     // the first 3 vertices make the first triangle; then the last 3 make the second triangle
     // (so it draws index 0 -> 1 -> 2 -> triangle one -> 2 -> 3 -> 0 -> triangle two)
-    0, 1, 2, 2, 3, 0,
-    4, 5, 6, 6, 7, 4
+    0, 1, 2, 2, 3, 0, // top of the cube
+    4, 5, 7, 7, 5, 6, // beneath the cube
+
+    8, 9, 10, 10, 9, 11,
+    12, 13, 14, 14, 13, 15,
+    14, 11, 12, 12, 11, 9,
+    10, 15, 8, 8, 15, 13
 };
