@@ -16,12 +16,14 @@ import vulkan_hpp;
 // 3rd party libs
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.h> // https://github.com/KhronosGroup/Vulkan-Headers/blob/main/include/vulkan/vulkan.h (gateway to a bunch of other garbage)
-#include <tiny_obj_loader.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+
+#define TINYOBJLOADER_IMPLEMENTATION
+#include <tiny_obj_loader.h>
 
 // window stuff
 #define GLFW_EXPOSE_NATIVE_WIN32    // Required to define for the #include below -- allows GLFW to show Windows handles (HWND/hInstance access)

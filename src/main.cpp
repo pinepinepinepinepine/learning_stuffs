@@ -3,6 +3,10 @@
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
 
+// path to the model's texture and path (duh)
+const std::string MODEL_PATH = "../models/spin.obj";
+const std::string MODEL_TEXTURE_PATH = "../textures/spinT.png";
+
 std::ofstream outputFile("../garbage_dump.txt");
 
 // Frames in Flight refers to having multiple frames be rendered at once -- the rendering of one frame doesn't interfere with another.
@@ -205,6 +209,9 @@ class HelloTriangleApplication
         createTextureImage();
         createTextureImageView();
         createTextureSampler();
+
+        loadModel();
+
 
         createVertexBuffer(); // see function for elaboration
 
@@ -1414,7 +1421,7 @@ class HelloTriangleApplication
         // this tells the command buffer where to read index data from (first parameter now instead of second? ok.)
         // the way this works is since we already binded the vertexBuffer to this commandBuffer, it associates the indices in the declaration order of the vertices, so indexBuffer value 1 is the second declared vertexBuffer
         // therefore, our original indices struct is executed sequentially ( 0, 1, 2, 2, 3, 0 ), and each index value within that sequence corresponds to our vertices struct (where first declared vertex is index value 0)
-        commandBuffers[wait_frameIndex].bindIndexBuffer( *indexBuffer, 0, vk::IndexType::eUint16 );
+        commandBuffers[wait_frameIndex].bindIndexBuffer( *indexBuffer, 0, vk::IndexType::eUint32 );
 
         // commandBuffers[wait_frameIndex].bindDescriptorSets selects what descriptor set is used. In our case, this command buffer is saying
         // "when accessing the resource (in our case, a uniform buffer) in the shader functions, use the descriptorSet at index [wait_frameIndex]"
@@ -1658,7 +1665,8 @@ class HelloTriangleApplication
         // fourth param: the number of colour channels this image uses
         // fifth param: forces the image to be loaded in a certain way: in our case, force it to load w/ an RGB and alpha channel (even if it doesn't have one -- just for consistency)
         // the return is a pointer to the first element in an array of pixel values: the pixels are laid out row by row with 4 bytes per pixel (if specified w/ STBI_rgb_alpha )
-        stbi_uc* pixels = stbi_load( "../textures/fatfatmillycatZOOM.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha );
+        stbi_uc* pixels = stbi_load( MODEL_TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha );
+            // for the first parameter, it's expecting a char* (not std::string), so convert it to a pointer to a char array (where its elements are each individual char in the std::string)
 
         // calculates the byte size of the image. just get the area (width x height), and multiply by bytes per pixel (4 in our case due to STBI_rgb_alpha)
         vk::DeviceSize imageSize = texWidth * texHeight * 4;
@@ -1747,6 +1755,83 @@ class HelloTriangleApplication
         imageMemory = vk::raii::DeviceMemory( logicalDevice, allocInfo );
 
         vkBindImageMemory( *logicalDevice, image, *imageMemory, 0 );
+    }
+
+
+    void loadModel()
+    {
+        // an .obj file consists of vertex positions, 'normals', texture coordinates and faces.
+            // Faces consist of an arbitrary amount of vertices, where each vertex refers to a position, normal, and or texture-coordinate all by index;
+                // making it possible to reuse entire vertices, and also individual attributes.
+                // so, it's an array of vertices that form a face (like a polygon, usually a triangle) by storing vertex indexes, which in turn contain position, normals, and texture coordinates
+             // while faces can contain an arbitrary amount of vertices, a program is that our program only renders triangles due to its specified topology.
+             // however, loadObj has an optional parameter to automatically triangulate the faces, which is enabled by default -- so we're good!
+            // Normals are used for lighting calculations; normals are stored by of the face's vertices
+                // https://en.wikipedia.org/wiki/Normal_mapping, for a handy graphic.
+            // obj models can also define a material and texture per face, but we're ignoring this.
+
+        // container which holds all vertex positions, normals, and texture coordinates.
+            // attrib.vertices, a vector of vertex positions
+            // attrib.normals, a vector for vertex normals
+            // attrib.texcoords, a vector for texture coordinates
+        tinyobj::attrib_t attrib;
+
+        // shapes contain all the separate object's grouped faces. They're essentially a bundle of faces that form some visual object.
+        std::vector<tinyobj::shape_t> shapes;
+
+        // stores the materials (colours and visual stuff) loaded from the .mtl file referenced by the .obj model (do i need to include the .mtl file within this app?)
+        std::vector<tinyobj::material_t> materials;
+
+        // contains errors (program'll crash) that occured with loading the file, missing material definition, etc.
+            // apparently there's also a .warn param or something, but it's not working? but anyways it's just warnings -- won't crash your program
+        std::string err;
+
+        // if loadObj returned false, loading the object has failed (and so an error will also occur)
+        bool obj_result = tinyobj::LoadObj( &attrib, &shapes, &materials, &err, MODEL_PATH.c_str() );
+
+        if ( !obj_result )
+            throw std::runtime_error(err);
+
+        // loop across each shape (every object in the model)
+        for ( const auto& shape : shapes )
+        {
+            // shape.mesh.indices is a full list of all indices used to create this shape
+            // the values of index will VERY likely (BASICALLY GUARANTEED) not be unique across the entirety of the loop,
+            // because the shape's faces will often times reuse the same index for its vertex instead of creating a duplicate vertex to create a face.
+            for (const auto& index : shape.mesh.indices )
+            {
+                Vertex vertex{};
+
+                // attrib contains the entire vertex data (position/textureCoords/normals) in a single array. use the index to isolate a specific vertex.
+
+                // each vertex is stored as 3 consecutive floats in an array, hence the multiplication of 3 to find the correct "vertex block"
+                // index.vertex_index is the index of the vertex itself (so, index.vertex_index is ++ the previous: 0, 1, 2, 3, 4)
+                // HOWEVER, attrib.vertices stores a vertex's position in a block of 3 floats, defining its X/Y/Z:
+                    // to identify vertex 0, look at attrib.vertices's index of 0, 1, 2, where attrib.vertices's index 0 is the vertex's X, index 1 is Y, and index 2 is Z.
+                    // to identify vertex 1, look at attrib.vertices's index of 2, 3, 4 for its X, Y, Z, and so on.
+                // hence why we multiply by 3 * index.vertex_index: 3 is the X/Y/Z (3 consecutive floats) it is stored as, and then add +0/1/2 from that value to find its respective X/Y/Z
+                vertex.pos = {
+                    attrib.vertices[3 * index.vertex_index + 0],
+                    attrib.vertices[3 * index.vertex_index + 1],
+                    attrib.vertices[3 * index.vertex_index + 2]
+                };
+
+                // the EXACT same logic as the vertex's position -- see comment above (do remember that attrib is a container of different arrays, hence why we use .textureCoords for stored texture coordinates)
+                // the ONLY difference is that it's in blocks of 2 because it's X, Y (NOT XYZ like w/ vertex positions), hence why we multiply by 2
+                    // it's in XY because the catPlushieT.png is 2D, so each vertex.textureCoord specifies the position in that texture png file to sample/use for the vertex's colour
+                vertex.textureCoords = {
+                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    attrib.texcoords[2 * index.texcoord_index + 1] // see added inclusion in the tutorial site here: https://docs.vulkan.org/tutorial/latest/08_Loading_models.html#_loading_vertices_and_indices
+                        // it works fine here, so yeah.
+                };
+
+                // setting the vertex colour (defaulted to pure white, we're not using colours directly, we're using the texture, it's nearly redundant)
+                vertex.color = {1.0f, 1.0f, 1.0f};
+
+                vertices.push_back( vertex );
+                indices.push_back( indices.size() ); // just incrementally assign indices per vertex (fix this garbage later)
+            }
+        }
     }
 
 
@@ -1843,7 +1928,7 @@ class HelloTriangleApplication
 
 
         // The glm::rotate function takes an existing transformation, rotation angle and rotation axis as parameters -- returns the model transformation matrix.
-        ubo.model = rotate( glm::mat4(1.0f), time * glm::radians(140.0f), glm::vec3(0.0f, 0.0f, 1.0f) );
+        ubo.model = rotate( glm::mat4(1.0f), time * glm::radians(160.0f), glm::vec3(0.0f, 1.0f, 0.0f) );
         // first param: glm::mat4, is a 4x4 matrix; input sets the diagonals of the matrix to the inputted value: 1.0f means it's 1 on the diagonal, therefore it's an identity matrix.
         // second param: glm::radians() converts the input to radians, where the input is in degrees.
         // third parameter: specifies where to rotate around: since Z is 1.0, it means to rotate around the Z axis.
@@ -1858,14 +1943,14 @@ class HelloTriangleApplication
         */
 
         // The glm::lookAt function takes the eye position, center position and up axis as parameters.
-        ubo.view = lookAt( glm::vec3(2.0f, 2.0f, 1.5f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f) );
+        ubo.view = lookAt( glm::vec3(-20.0f, 30.0f, 60.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f) ); // UPDATE W/ MODEL STUFF: UP AXIS IS NOW Y INSTEAD OF Z
         // first param, .eye: where the eye position will be (so our camera is at 2x, 2y, 2z)
         // second param, .center: the point where the camera is looking at (our camera is facing 0x/0y/0z)
         // third param, .up, 'THE UP VECTOR': confusing, but "UP" is Z positive (NOT Y FOR SOME REASON WITH GLM) -- Typically (0x, 0y, 1z)
         // See big_notes_math for how lookAt computes: https://learnopengl.com/Getting-started/Camera, but it literally just returns the view transformation matrix onto ubo.view
 
         // The glm::perspective function takes the vertical field of view, aspect ratio, near and far view planes as parameters.
-        ubo.proj = glm::perspective( glm::radians(45.0f), static_cast<float>(swapChain_Extent_ImageResolution.width) / static_cast<float>(swapChain_Extent_ImageResolution.height), 0.1f, 10.0f );
+        ubo.proj = glm::perspective( glm::radians(90.0f), static_cast<float>(swapChain_Extent_ImageResolution.width) / static_cast<float>(swapChain_Extent_ImageResolution.height), 0.1f, 350.0f );
         // first param, .fovy: specifies the field of view angle in degrees in the Y direction
         // second param, .aspect: the aspect ratio -- determines the field of view in the X direction
         // third param, .zNear: specifies the distance from the camera to the near clipping plane (always positive)

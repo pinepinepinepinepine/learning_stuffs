@@ -642,3 +642,9 @@ Creating a depth image is fairly straight-forward/similar to a bunch of other st
         vk::Format::eD24UnormS8Uint: 24-bit float for depth (as well as 8 bit stencil component)
             https://docs.vulkan.org/refpages/latest/refpages/source/VkFormat.html just ctrlF D and you'll see some more.
             The stencil component is used for "Stencil Tests", which is elaborated upon later, but it's an additional test that can be added alongside the depth testing.
+
+======
+    Loading Models
+Right now we're hard-coding vertices and indices to use for our program.
+However, we can load vertices and indices from an actual model file.
+For this tutorial, we're using tinyobjloader to load vertices from an OBJ file.
