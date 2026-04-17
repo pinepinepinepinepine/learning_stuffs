@@ -1830,6 +1830,10 @@ class HelloTriangleApplication
                 // setting the vertex colour (defaulted to pure white, we're not using colours directly, we're using the texture, it's nearly redundant)
                 vertex.color = {1.0f, 1.0f, 1.0f};
 
+                // maybe as an added thing, we can maybe make a index for textures or something to allow textures to be reused from index?
+                // it's ONLY checking whether or not the vertex itself is completely duplicated (same attributes, including texture coords/normals/positions)
+                // it might be ideal to just use separate indices to reuse textures, and normals, because we are likely re-creating a TON of re-used positions/normals/textures
+                // instead of looking at unique everything, but anyways.
                 if ( uniqueVertices.count( vertex ) == 0 ) // if this vertex is NOT an ENTIRELY duplicated vertex (including texture coords, normals, and positions), add it to our map then add it to the vertex buffer.
                 {
                     uniqueVertices[vertex] = static_cast<uint32_t>( vertices.size() );

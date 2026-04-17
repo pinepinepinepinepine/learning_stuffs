@@ -62,8 +62,8 @@ struct Vertex
 
 
     // we need to specify how to compare vertex objects to one another for our unordered_map's usage in loadModel():
-        // If the vertex position is within the map, reuse the initial index (don't create a unique entry for the vertex position);
-        // If the vertex position is not within the map, create a new index by adding +1 to the highest index (and do create a unique entry for the vertex position).
+        // If the vertex is within the map, reuse the initial index (don't create a unique entry for the vertex);
+        // If the vertex is not within the map, create a new index by adding +1 to the highest index (and do create a unique entry for the vertex).
     bool operator==( const Vertex& other ) const {
         return pos == other.pos && color == other.color && textureCoords == other.textureCoords;
     }
@@ -76,14 +76,44 @@ struct Vertex
 std::vector<Vertex> vertices;
 std::vector<uint32_t> indices;
 
+// see
+// we're specializing the std::hash struct (it's a struct, not REALLY a function -- its referred to as a 'functor') to 'accept' a vertex.
+// c++ allows specializations of std::hash only within the std namespace, hence namespace std{}
+namespace std
+{
+    // how we specialize hash -- setting it to be compatible with a Vertex object.
+    template<> struct hash<Vertex>
+    {
+        // we're overloading the operator() to accept a vertex with hash
+        size_t operator()(Vertex const& vertex) const
+        {
+            // these are 'struct function objects' (referred to as functors);
+            // in c++, std::hash is a callable object -- you use these like functions onto whatever corresponding type w/ operator()
+            hash<glm::vec3> vec3_hash;
+            hash<glm::vec2> vec2_hash;
 
-// fix this shit: what am i looking at?
-namespace std {
-    template<> struct hash<Vertex> {
-        size_t operator()(Vertex const& vertex) const {
-            return
-            ( ( hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1) ) >> 1 ) ^
-                (hash<glm::vec2>()(vertex.textureCoords) << 1);
+            // get 3 separate hashes for each member -- we shift it lightly before combining.
+            size_t vertex_position_hash = vec3_hash( vertex.pos );
+            size_t vertex_color_hash = vec3_hash( vertex.color ) << 1;
+            size_t vertex_textureCoords_hash = vec2_hash( vertex.textureCoords ) << 1;
+
+            // combine the three hashes into a central, vertex hash.
+            size_t vertex_hash = ( ( vertex_position_hash ^ vertex_color_hash ) >> 1 ) ^ ( vertex_textureCoords_hash );
+
+            // hashes are just long integers, and XOR only operates on binary values.
+            // So, XOR'll converts these hashes to binary to then operator^ (XOR)'s return:
+            // XOR's return is simple:
+                // if the specific bit at the same location between the two binary data are equal to one another: set the output bit to 0.
+                // if the specific bit at the same location between the two binary data are not equal to one another: set the output bit to 1.
+            // Check the comment on operator<< within main.cpp: all it does is just shift the bits by 1 (which means it won't be the same hash)
+            // the reason we're using << and >> is literally just to prevent hash collisions. It's unbelievably unlikely, but we'd like to be safe.
+                // research more about mixing functions w/ hash to find out more, but yeah -- it's just VERY unlikely, but not zero.
+            // the idea with this entire function though is to return a unique hash for a vertex, and the way we do such a thing is by combining the different member's hashes to get a final hash that we'll use.
+
+            return vertex_hash;
+
+            // From the tutorial site: ( ( hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1) ) >> 1 ) ^ ( hash<glm::vec2>()(vertex.textureCoords) << 1 );
+            // but the expanded version is just more clear.
         }
     };
 }

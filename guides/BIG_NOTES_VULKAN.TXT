@@ -720,3 +720,14 @@ doesn't take advantage of the index buffer since we're literally rendering the v
         indices.push_back( indices.size() ); // just incrementally assign indices per vertex (fix this garbage later)
     And that would return an equal amount of vertices.size() to indices.size()
     Now, with the inclusion of the unordered_map, we dropped vertices to 9k from 47k, while our index.size is still at 47k (indicating the reusability of vertices)
+
+
+    Hash stuff: see vertex.cpp's std::hash specialization
+    operator<< comment from main.cpp, but please just check vertex.cpp and mainload() for some hash stuff
+        // operator<< shifts the bits by the right-hand value (i), starting from the left-hand element in the bit (however, the index 0 is at the right of the byte, 7 is at the left)
+        // the proper terminology is from most significant bit (instead of the left-most) to least significant (instead of the right-most bit), and the indexing of a bit starts from the least important to the most important.
+        // therefore, a bit index of 0 is the least significant bit (the right-most)
+        // it's a little weird, but for creating bitmasks to check them against another bitmask, we start with 1 instead of 0 (whenever using <<).
+        // typeFilter & ( 1 << i ) creates a temporary bitmask for comparison: it only sets the i-th least significant of typeFilter, leaving the rest to zero.
+        // if ( typeFilter & ( 1 << i ) ) is non-zero, it means the bit flag at index i is a suitable bit flag (the rest of the flags are zero due to << usage), so return the index (which in turn tells us the memory type to use).
+            // this entire ordeal just tells us IF the memory type is suitable to begin with for the buffer we want (in our case, a vertex buffer)
