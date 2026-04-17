@@ -731,3 +731,23 @@ doesn't take advantage of the index buffer since we're literally rendering the v
         // typeFilter & ( 1 << i ) creates a temporary bitmask for comparison: it only sets the i-th least significant of typeFilter, leaving the rest to zero.
         // if ( typeFilter & ( 1 << i ) ) is non-zero, it means the bit flag at index i is a suitable bit flag (the rest of the flags are zero due to << usage), so return the index (which in turn tells us the memory type to use).
             // this entire ordeal just tells us IF the memory type is suitable to begin with for the buffer we want (in our case, a vertex buffer)
+
+
+======
+Mipmaps
+    Mipmaps are VERY WIDELY used in games and rendering software (SO LISTEN UP BUTTERCUP!)
+
+Mipmaps are precalculated, downscaled versions of an image: each new image is half the width and height of the previous one: https://docs.vulkan.org/tutorial/latest/_images/images/mipmaps_example.jpg, for an example.
+Mipmaps are used as a form of 'Level of Detail' (also referred to as LOD): objects that are far away from the camera will sample their textures from the smaller mip images.
+Using smaller images increases the rendering speed and avoids some artifacts such as the 'Moire Pattern' (https://en.wikipedia.org/wiki/Moir%C3%A9_pattern)
+    In the context of 3D objects, level of detail can be used by reducing the number of vertices on the shape/object itself
+    when you're far away from the camera, you really don't need to be rendering the full original model, as it's WAY better for performance and memory to use lesser quality models as you CANNOT tell from far away.
+        However, 3D Level of Detail isn't elaborated upon in this section, so we're just sticking with the 2D textures for now -- just go learn it yourself!
+            https://en.wikipedia.org/wiki/Level_of_detail_(computer_graphics)#A_discrete_LOD_example, for a 3D object example -- scroll down a bit and see how much faster it takes to render!
+
+In Vulkan, mip images are stored individually within different mip levels of a VkImage: they are LITERALLY stored alongside the image -- we just use the mipLevel to specify which mip image we want
+For example, Mip level 0 is the original image (unmodified, original size -- highest detail), where mip levels after 0 are the downscaled versions
+    Mip levels after 0 are commonly referred to as the 'Mip Chain'
+
+The number of available mip levels is specified within the creation of a VkImage object through vk::ImageCreateInfo
+    

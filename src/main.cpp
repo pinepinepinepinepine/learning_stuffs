@@ -120,6 +120,12 @@ class HelloTriangleApplication
     std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
     std::vector<void*> uniformBuffersMapped; // a pointer to the memory region so we can write data to it later on.
 
+    // mip levels for all the different mip images we want to create! see big_notes_vulkan for more elaboration.
+    // we need to calculate the number of mip levels we wish to create from the original dimensions of the image.
+        // a mip image is half the width+height from the previous mip image, so we can't make an infinite amount of images.
+        // the furthest we can go is halving until the mip image is 1texel by 1texel -- Vulkan doesn't allow less than 1texel mip images.
+    uint32_t mipLevels;
+
     // image objects are used instead of directly reading element by element from the pixel array to the make an image.
     // it's faster this way, and cleaner -- pixels within an image object are known as "texels".
     VkImage textureImage = nullptr;
@@ -1667,6 +1673,16 @@ class HelloTriangleApplication
         // the return is a pointer to the first element in an array of pixel values: the pixels are laid out row by row with 4 bytes per pixel (if specified w/ STBI_rgb_alpha )
         stbi_uc* pixels = stbi_load( MODEL_TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha );
             // for the first parameter, it's expecting a char* (not std::string), so convert it to a pointer to a char array (where its elements are each individual char in the std::string)
+
+        // see the mipLevel variable comments, but we're just seeing how many mip levels we can have until it reaches 1x1.
+        // log2(<x>) returns the 'logarithmatic value' (base 2) of x, where x is, in our case, the higher value between the texture's width and height (std::max).
+            // a logarithmic value is the exponent needed to get X from a 'base value'.
+                // so, log2(x) returns the exponent (e) of 2 needed to find X -- 2^e = x
+            // log2 calculates how many times that value (x) can be divided by 2.
+        // then to get a nice and even integer, std::floor rounds down log2's return value to the nearest integer -- discarding the decimals.
+        // In total, it will tell us the amount of times we can half the image (by /2-ing the width and height from the previous) until we reach 1x1.
+        // Then, we add +1 to include the original, unaltered image as a mip level.
+        mipLevels = static_cast<uint32_t>( std::floor(std::log2( std::max( texWidth, texHeight ) ) ) ) + 1;
 
         // calculates the byte size of the image. just get the area (width x height), and multiply by bytes per pixel (4 in our case due to STBI_rgb_alpha)
         vk::DeviceSize imageSize = texWidth * texHeight * 4;
