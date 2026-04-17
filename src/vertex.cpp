@@ -60,6 +60,13 @@ struct Vertex
         return { position_description, color_description, texture_coords_description };
     }
 
+
+    // we need to specify how to compare vertex objects to one another for our unordered_map's usage in loadModel():
+        // If the vertex position is within the map, reuse the initial index (don't create a unique entry for the vertex position);
+        // If the vertex position is not within the map, create a new index by adding +1 to the highest index (and do create a unique entry for the vertex position).
+    bool operator==( const Vertex& other ) const {
+        return pos == other.pos && color == other.color && textureCoords == other.textureCoords;
+    }
 };
 
 
@@ -70,46 +77,13 @@ std::vector<Vertex> vertices;
 std::vector<uint32_t> indices;
 
 
-
-// // Previously we just hard-coded the vertices' positions within shader.slang, but now we're combining vertices into a single vector.
-// // This is called interleaving vertex attributes.
-// const std::vector<Vertex> vertices {
-//     { { -0.5f, -0.5f, 0.0f }, rgb_float( { 134, 181, 242 } ), { 1.0f, 0.0f } },
-//     { {  0.5f, -0.5f, 0.0f }, rgb_float( { 79,  76,  237 } ), { 0.0f, 0.0f } },
-//     { {  0.5f,  0.5f, 0.0f }, rgb_float( { 166, 127, 245 } ), { 0.0f, 1.0f } },
-//     { { -0.5f,  0.5f, 0.0f }, rgb_float( { 124, 88,  196 } ), { 1.0f, 1.0f } },
-
-
-//     // annoying to format these nicely
-//     {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-//     {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-//     {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-//     {{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-
-//     {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 1.0f}}, // 8
-//     {{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 1.0f}}, // 9
-//     {{ -0.5f, -0.5f, 0.0f }, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}}, // 10
-//     {{  0.5f, -0.5f, 0.0f }, {1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}}, // 11
-
-//     {{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}}, // 12
-//     {{-0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}}, // 13
-//     {{0.5f, 0.5f, 0.0f }, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}}, // 14
-//     {{-0.5f,  0.5f, 0.0f }, {0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}}, // 15
-// };
-// // for the third member, textureCoords, notice how it's from a range of 0-1. This is because of .unnormalizedCoordinates = vk::False.
-//     // 1.0fx, 1.0fy is bottom right corner, where 0.0x, 0.0y is the top left corner.
-//     // Coordinates below 0, or above 1, results in seeing the addressing modes in action due to trying to read a texel out of the image's extent
-
-// // represents the index buffer's indices -- the specified indices'll be used to make a rectangle
-// const std::vector<uint16_t> indices = {
-//     // also, the GPU will make triangles (or whatever topology we specified) in sequential order, so:
-//     // the first 3 vertices make the first triangle; then the last 3 make the second triangle
-//     // (so it draws index 0 -> 1 -> 2 -> triangle one -> 2 -> 3 -> 0 -> triangle two)
-//     0, 1, 2, 2, 3, 0, // top of the cube
-//     4, 5, 7, 7, 5, 6, // beneath the cube
-
-//     8, 9, 10, 10, 9, 11,
-//     12, 13, 14, 14, 13, 15,
-//     14, 11, 12, 12, 11, 9,
-//     10, 15, 8, 8, 15, 13
-// };
+// fix this shit: what am i looking at?
+namespace std {
+    template<> struct hash<Vertex> {
+        size_t operator()(Vertex const& vertex) const {
+            return
+            ( ( hash<glm::vec3>()(vertex.pos) ^ (hash<glm::vec3>()(vertex.color) << 1) ) >> 1 ) ^
+                (hash<glm::vec2>()(vertex.textureCoords) << 1);
+        }
+    };
+}

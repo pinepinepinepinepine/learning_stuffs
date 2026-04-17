@@ -25,6 +25,10 @@ import vulkan_hpp;
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
+// for the hash<glm::vec3> usage in vertex.cpp
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
+
 // window stuff
 #define GLFW_EXPOSE_NATIVE_WIN32    // Required to define for the #include below -- allows GLFW to show Windows handles (HWND/hInstance access)
 #include <GLFW/glfw3native.h>       // Gives GLFW Native interface for this OS (so allows Win32 Functions on GLFW windows)
@@ -38,6 +42,7 @@ import vulkan_hpp;
 #include <stdexcept>
 #include <fstream>
 #include <chrono>
+#include <unordered_map>
 
 // my utils
 #include "random_utils.cpp"

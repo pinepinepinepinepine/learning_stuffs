@@ -1792,6 +1792,8 @@ class HelloTriangleApplication
         if ( !obj_result )
             throw std::runtime_error(err);
 
+        std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+
         // loop across each shape (every object in the model)
         for ( const auto& shape : shapes )
         {
@@ -1828,12 +1830,15 @@ class HelloTriangleApplication
                 // setting the vertex colour (defaulted to pure white, we're not using colours directly, we're using the texture, it's nearly redundant)
                 vertex.color = {1.0f, 1.0f, 1.0f};
 
-                vertices.push_back( vertex );
-                indices.push_back( indices.size() ); // just incrementally assign indices per vertex (fix this garbage later)
+                if ( uniqueVertices.count( vertex ) == 0 ) // if this vertex is NOT an ENTIRELY duplicated vertex (including texture coords, normals, and positions), add it to our map then add it to the vertex buffer.
+                {
+                    uniqueVertices[vertex] = static_cast<uint32_t>( vertices.size() );
+                    vertices.push_back(vertex);
+                }
+                indices.push_back( uniqueVertices[vertex] ); // Now we're pushing back some duplicated index values instead of sequentially going through ALL the vertices by index++
             }
         }
     }
-
 
 
     // Abstracted GPU buffer creation function -- see big_note's original createVertexBuffer() for the original.
@@ -1999,6 +2004,8 @@ class HelloTriangleApplication
         copyBuffer( stagingBuffer, indexBuffer, bufferSize );
 
         // This function is INSANELY similar to createVertexBuffer. hell, it's probably a good idea to make it into an abstracted function similarily w/ createGPUBuffer but for staging buffers... whatever! future problem!
+
+        std::cout << "Total Indices: " << indices.size() << std::endl;
     }
 
 
@@ -2048,6 +2055,8 @@ class HelloTriangleApplication
         copyBuffer( stagingBuffer, vertexBuffer, stagingInfo.size );
 
         outputFile << get_current_time() << " | Copied the contents of the Staging Buffer to the Vertex Buffer" << std::endl;
+
+        std::cout << "Total Vertices: " << vertices.size() << std::endl;
     }
 
     vk::raii::CommandBuffer beginSingleTimeCommands()
