@@ -76,9 +76,10 @@ struct Vertex
 std::vector<Vertex> vertices;
 std::vector<uint32_t> indices;
 
-// see
-// we're specializing the std::hash struct (it's a struct, not REALLY a function -- its referred to as a 'functor') to 'accept' a vertex.
-// c++ allows specializations of std::hash only within the std namespace, hence namespace std{}
+// see loadmodel() for some additional information in main.cpp, and
+// we're template specializing the std::hash struct (it's a struct, not REALLY a function -- its referred to as a 'functor') to 'accept' a vertex.
+// c++ allows template specializations of std::hash only within the std namespace, hence namespace std{}
+// if you're interested, check out hash functions, as they're apparently another huge can of worms.
 namespace std
 {
     // how we specialize hash -- setting it to be compatible with a Vertex object.
