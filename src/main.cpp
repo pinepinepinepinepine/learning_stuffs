@@ -621,7 +621,7 @@ class HelloTriangleApplication
 
         for ( auto &swapChainImage : swapChainImages )
         {
-            swapChainImageViews.emplace_back( createImageView( swapChainImage, swapChain_surfaceFormat.format, vk::ImageAspectFlagBits::eColor ) );
+            swapChainImageViews.emplace_back( createImageView( swapChainImage, swapChain_surfaceFormat.format, vk::ImageAspectFlagBits::eColor, 1 ) );
         }
     }
 
@@ -1334,6 +1334,8 @@ class HelloTriangleApplication
         commandBuffers[wait_frameIndex].begin({}); // tutorial mistakenly uses operator-> but ok... we'll use operator. This signals the start of the command buffer's commands.
             // vk::raii::CommandBuffer::begin() implicitly resets the already existing commands inside the command buffer, if we've already recorded a command once.
 
+
+            // TODO: DITCH THIS FUNCTION AND JUST MAKE A CENTRAL ONE -- THIS IS POINTLESS
         // Before starting rendering, transition the swapchain image to COLOR_ATTACHMENT_OPTIMAL
         transition_image_layout (
             swapChainImages[swapChain_imageIndex], vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal, // We are now transitioning the swapChain's image (swapChain_imageIndex) to go from eUndefined (no previous layout) -> eColorAttachmentOptimal (where eColorAttachmentOptimal is optimal for rendering)
@@ -1527,6 +1529,7 @@ class HelloTriangleApplication
         createImage(
             swapChain_Extent_ImageResolution.width,
             swapChain_Extent_ImageResolution.height,
+            1, // mip levels -- we don't want mipmapping, so 1 = default image
             depthFormat, // the format will specify what the image data will contain
             vk::ImageTiling::eOptimal,
             vk::ImageUsageFlagBits::eDepthStencilAttachment, // and this will specify what we intend on using it
@@ -1536,7 +1539,7 @@ class HelloTriangleApplication
         );
 
         // and same logic as with all the other image objects: use a image view to access it instead of the raw vkimage.
-        depthImageView = createImageView( depthImage, depthFormat, vk::ImageAspectFlagBits::eDepth );
+        depthImageView = createImageView( depthImage, depthFormat, vk::ImageAspectFlagBits::eDepth, 1 );
             // only thing different here is that we're specifying eDepth as its aspectFlag instead of eColor (like w/ the texture image view)
             // this is because we're making a depth image that'll store depth values, NOT colour data.
                 // for a visualization: https://en.wikipedia.org/wiki/Depth_map
@@ -1592,7 +1595,9 @@ class HelloTriangleApplication
     // THE TUTORIAL DOESN'T WANNA CONVERT ALL THE RAII OBJECTS TO STANDARD, NON-RAII OBJECTS. ANNOYING.
     // IF YOU WANT, ME, LET createSwapChainImageViews() (STRICTLY ONLY FOR SWAP CHAIN) use this function TOO! ANNOYING!
     // just as a little reminder, the original tutorial doesn't use raii. IT'S THE SAME THING. just i don't know. documentation with raii is fucking annoying.
-    vk::raii::ImageView createImageView( const VkImage &image, vk::Format format, vk::ImageAspectFlagBits aspectFlags ) // aspectFlag is now a parameter instead of hardcoded to vk::ImageAspectFlagBits::eColor -- it literally just represents what type of data it'll store (depth/colour, for example)
+    // aspectFlag is now a parameter instead of hardcoded to vk::ImageAspectFlagBits::eColor -- it literally just represents what type of data it'll store (depth/colour, for example)
+    // and we also added mipLevels to indicate how many mip images are present -- see big_notes and other comments relating to mipLevel variables scattered about.
+    vk::raii::ImageView createImageView( const VkImage &image, vk::Format format, vk::ImageAspectFlagBits aspectFlags, uint32_t mipLevels )
 	{
 		vk::ImageViewCreateInfo viewInfo {
 		    .image            = image, // the image we're making a view of
@@ -1656,7 +1661,7 @@ class HelloTriangleApplication
     // THE SAME IDEA AS SWAPCHAIN'S IMAGE VIEWS.
     void createTextureImageView()
     {
-        textureImageView = createImageView( textureImage, vk::Format::eR8G8B8A8Srgb, vk::ImageAspectFlagBits::eColor );
+        textureImageView = createImageView( textureImage, vk::Format::eR8G8B8A8Srgb, vk::ImageAspectFlagBits::eColor, mipLevels );
     }
 
     void createTextureImage()
@@ -1718,6 +1723,7 @@ class HelloTriangleApplication
         createImage(
             texWidth,
             texHeight,
+            mipLevels, // mip levels -- we want to switch our texture image to a downscaled version whenever the model is far away.
             vk::Format::eR8G8B8A8Srgb,
             vk::ImageTiling::eOptimal,
             vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
@@ -1727,17 +1733,17 @@ class HelloTriangleApplication
         );
 
         // transitions textureImage to an optimal layout to receive pixel values (after creation, it's .initialLayout (member) is equal to eUndefined )
-        transitionImageLayout( textureImage, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal );
+        transitionImageLayout( textureImage, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal, mipLevels );
 
         // actually copy the staging buffer's pixel data onto the texture image -- textureImage now actually has pixel data
         copyBufferToImage( stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight) );
 
         // transitions textureImage to an optimal layout for shader access
-        transitionImageLayout( textureImage, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal );
+        transitionImageLayout( textureImage, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal, mipLevels );
     }
 
 
-    void createImage( uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage,
+    void createImage( uint32_t width, uint32_t height, uint32_t mipLevels, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage,
         vk::MemoryPropertyFlags properties, VkImage &image, vk::raii::DeviceMemory &imageMemory )
     {
         vk::ImageCreateInfo imageInfo {
@@ -1745,7 +1751,7 @@ class HelloTriangleApplication
                 // 1D and 3D is confusing in the context of an image: 1D can store an array of data or a gradient, whereas 3D can be used to store 'voxel volumes'
             .format = format,
             .extent = {width, height, 1}, // the dimensions (extent) of the image: so, width = X, height = Y, and 1 = depth (we use 1 as depth because we've one pixel, so it's technically 1 pixel Z -- its a layer)
-            .mipLevels = 1, // 1 means we aren't using mipmapping
+            .mipLevels = mipLevels, // 1 means we aren't using mipmapping, higher than 1 indicates we ar -- see big_notes and class members mipLevels (to helloTriangleApplication) for an elaboration
             .arrayLayers = 1, // 1 means our image/texture will not be an array.
             .samples = vk::SampleCountFlagBits::e1, // referring to multi-sampling: only relevant for images that are used as attachments, so we just e1 it to specify only one.
             .tiling = tiling, // how the texels are arranged in memory. vulkan supports two tiling methods:
@@ -2167,7 +2173,7 @@ class HelloTriangleApplication
     }
 
 
-    void transitionImageLayout(const VkImage& image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout)
+    void transitionImageLayout( const VkImage& image, vk::ImageLayout oldLayout, vk::ImageLayout newLayout, uint32_t mipLevels )
     {
         auto commandBuffer = beginSingleTimeCommands();
 
@@ -2180,7 +2186,7 @@ class HelloTriangleApplication
             .subresourceRange { // as a whole, specifies the specific part of the image
                 vk::ImageAspectFlagBits::eColor, // .aspectMask: what aspect of the image to change (Color or Depth, for instance)
                 0, // .baseMipLevel: which mipmap to start from (don't worry about it for now)
-                1, // .levelCount: how many mipmaps to include (don't worry about it for now)
+                mipLevels, // .levelCount: how many mipmaps to include -- see big_notes and other comments regarding 'mipLevels' variables.
                 0, // .baseArrayLayer: which array layer to start from (we're starting from the first layer because it's a single image -- index 0)
                 1  // .LayerCount: how many array layers to include (we're only including 1)
             }
