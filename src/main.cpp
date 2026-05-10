@@ -1603,9 +1603,10 @@ class HelloTriangleApplication
 		    .image            = image, // the image we're making a view of
 		    .viewType         = vk::ImageViewType::e2D, // Specifies we're rending to a 2D screen. (:e3D is 3d; :e1D is 1d)
 		    .format           = format, // The color format
-		    .subresourceRange = { aspectFlags, 0, 1, 0, 1 } // Describes the image's purpose and which part of the image should be accessed (for example, we're specifying Color w/ vk::ImageAspectFlagBits::eColor)
+		    .subresourceRange = { aspectFlags, 0, mipLevels, 0, 1 } // Describes the image's purpose and which part of the image should be accessed (for example, we're specifying Color w/ vk::ImageAspectFlagBits::eColor)
         }; // There's also a .components field which mixes color channels around: imageViewCreateInfo.components = { vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity, vk::ComponentSwizzle::eIdentity}; for an example (no clue)
         // Hypothetically, if we had vk::SwapchainCreateInfoKHR::imageArrayLayers above 1, we should make multiple image views for each different layer to access them individually -- the maximum amount of image views is generally 16.
+            // mipLevels as levelCount because we need to create a single image view that covers every mip image for our textureImage.
 
 		return vk::raii::ImageView( logicalDevice, viewInfo );
 	}
@@ -1645,12 +1646,15 @@ class HelloTriangleApplication
             .unnormalizedCoordinates = vk::False
         };
 
-        // Elaborated in another chapter, but mipmapping is essentially another type of filter that can be applied.
-            // Only reason this isn't in directly initialized in the vkSamplerCreateInfo struct is because of stupid order, and the comment above applies to all of them, so I don't wanna retype the same thing.
+        // Whenever a texture is sampled (selected/viewed and subsequently shown onto the screen), the sampler selects a mip level ACCORDING to the pseudocode present in BIG_NOTES.
         samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
         samplerInfo.mipLodBias = 0.0f;
         samplerInfo.minLod = 0.0f;
-        samplerInfo.maxLod = 0.0f;
+        samplerInfo.maxLod = vk::LodClampNone; // update: we changed this away from 0.0f because we want to actually have a lod range: here it's uncapped and won't be clamped.
+
+        // comment this if we want to see mip images in effect
+        // it's a range of minLod to maxLod, where the further you are, the less level of detail (lod) is required -- here we just set the minimum to force lesser lod.
+        samplerInfo.minLod = static_cast<float>(mipLevels / 2);
 
         textureSampler = vk::raii::Sampler( logicalDevice, samplerInfo );
         // Unlike some objects, the textureSampler does not reference (or bind to) a specific vkImage (including vkImage) on creation.
@@ -1687,7 +1691,7 @@ class HelloTriangleApplication
         // then to get a nice and even integer, std::floor rounds down log2's return value to the nearest integer -- discarding the decimals.
         // In total, it will tell us the amount of times we can half the image (by /2-ing the width and height from the previous) until we reach 1x1.
         // Then, we add +1 to include the original, unaltered image as a mip level.
-        mipLevels = static_cast<uint32_t>( std::floor(std::log2( std::max( texWidth, texHeight ) ) ) ) + 1;
+        mipLevels = static_cast<uint32_t>( std::floor( std::log2( std::max( texWidth, texHeight ) ) ) ) + 1;
 
         // calculates the byte size of the image. just get the area (width x height), and multiply by bytes per pixel (4 in our case due to STBI_rgb_alpha)
         vk::DeviceSize imageSize = texWidth * texHeight * 4;
@@ -1726,7 +1730,10 @@ class HelloTriangleApplication
             mipLevels, // mip levels -- we want to switch our texture image to a downscaled version whenever the model is far away.
             vk::Format::eR8G8B8A8Srgb,
             vk::ImageTiling::eOptimal,
-            vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+            vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc,
+                // With the addition of creating mipmaps, we need to allow our image to also read data (TransferSrc) through a transfer, instead of just writing/transfering to some destination.
+                // This is because vkCmdBlitImage (which is used to create mipmaps from miplevel0 -- the original image) is a transfer operation,
+                // and so we need to 'transfer the data to itself' by reading its own previous miplevel during mipmap creation.
             vk::MemoryPropertyFlagBits::eDeviceLocal,
             textureImage,
             textureImageMemory
@@ -1738,8 +1745,158 @@ class HelloTriangleApplication
         // actually copy the staging buffer's pixel data onto the texture image -- textureImage now actually has pixel data
         copyBufferToImage( stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight) );
 
-        // transitions textureImage to an optimal layout for shader access
-        transitionImageLayout( textureImage, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal, mipLevels );
+        // For generating mipmaps, vkCmdBlitImage depends on the layout of the image it operates on.
+        // We do not want to transfer the image to VK_IMAGE_LAYOUT_GENERAL, as it'll be slow (and a waste).
+        // Instead, the source image (the one that provides the previous miplevel to create the next miplevel image) should be VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        // the destination image (where we the write the mip image to) should be VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL.
+            // Vulkan allows us to specifically transition the image layout of the source and destination mip level of an image independently,
+            // which is faster performance wise than transitioning the entirety of it.
+        // Each blit (call to vkCmdBlitImage) will only deal with two mip levels at a time, so we'll transition each level between each blit.
+
+        // // transitions textureImage to an optimal layout for shader access
+        // transitionImageLayout( textureImage, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal, mipLevels );
+        // We are COMMENTING THIS OUT because AFTER/During mip image creation, we are transitioning them (mip images in the chain) individually to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        // Again, this will result in each mip level of the texture image to be VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL. Each level will be transitioned to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL after the blit command reading from it is finished.
+        generateMipmaps(textureImage, vk::Format::eR8G8B8A8Srgb, texWidth, texHeight, mipLevels); // SO: after this RUNS, EVERY mip image will be set to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL.
+    }
+
+
+    // as a heads-up, it is WEIRD to generate mip images at run time: they should be pre generated and stored in a texture file, where the original image (lvl 0) is as well -- it's just faster to not have to deal w/ this at run-time.
+    // as homework: make a way to load mip images from a pre-generated file!
+    void generateMipmaps( VkImage &image, vk::Format imageFormat, int32_t texWidth, int32_t texHeight, uint32_t mipLevels )
+    {
+
+        // Check if image format supports linear blit-ing: check if optimalTilingFeatures supports linear image filtering
+        // VkFormatProperties has 3 fields (linearTilingFeatures, optimalTilingFeatures, and bufferFeatures) which describes how the format can be used.
+        // It's weird the usage, but we need to check the bit eSampledImageFilterLinear, within optimalTilingFeatures because our blit is using vk::Filter::eLinear
+        // we should probably make the vkFormat not hardcoded within the argument call, and make it set w/ a variable depending on what the image ACTUALLY is to track it better.
+        vk::FormatProperties formatProperties = physicalDevice.getFormatProperties(imageFormat);
+        if ( !( formatProperties.optimalTilingFeatures & vk::FormatFeatureFlagBits::eSampledImageFilterLinear ) )
+            throw std::runtime_error("texture image format does not support linear blitting!");
+
+
+        // the tutorial site instead makes a std::unique_ptr<vk::raii::CommandBuffer>, but this isn't terribly important (i don't care about performance costs) with a direct copy (look into this after the trip, ofc)
+        // the only difference is that we're referring to the same commandBuffer created in beginSingleTimeCommands() due to us not ending it, so it doesn't get destroyed like w/ a normal object
+        // it's still in memory!
+        vk::raii::CommandBuffer commandBuffer = beginSingleTimeCommands();
+
+        // I'm using designated initialization instead of the overloaded constructor provided because I think it's way more digestible.
+        vk::ImageMemoryBarrier barrier {
+            .srcAccessMask = vk::AccessFlagBits::eTransferWrite, // the memory dependencies that must complete before the barrier is executed
+            .dstAccessMask = vk::AccessFlagBits::eTransferRead, // the memory dependencies that are allowed to occur after the barrier is executed
+            .oldLayout = vk::ImageLayout::eTransferDstOptimal, // what the image layout currently is (if it is NOT eTransferDstOptimal, we're leading to undefined behaviour)
+            .newLayout = vk::ImageLayout::eTransferSrcOptimal, // what the image layout we'll be transitioning to after the barrier's execution.
+            .srcQueueFamilyIndex = vk::QueueFamilyIgnored, // we aren't transitioning the queue family, will remain the already defined one (unchanged).
+            .dstQueueFamilyIndex = vk::QueueFamilyIgnored, // we aren't transitioning the queue family, will remain the already defined one (unchanged).
+            .image = image, // the image to operate on -- we later specify the EXACT mip levels images with subresourceRange
+
+            // technically useless: we're overriding it immediately, but i think it's neat.
+            .subresourceRange {
+                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .levelCount = 1,
+                .baseArrayLayer = 0,
+                .layerCount = 1
+            }
+        };
+
+        int32_t mipWidth = texWidth;
+        int32_t mipHeight = texHeight;
+
+        // for every mip level we're wanting to create, we want to modify these fields through its respective iteration:
+        // .srcAccessMask, .dstAccessMask, .oldLayout, .newLayout, .subresourceRange.miplevel
+        for ( uint32_t i = 1; i < mipLevels; i++ )
+        {
+            // which mip level we're creating FROM (src mip image)
+            barrier.subresourceRange.baseMipLevel = i - 1;
+            // we'll set the optimal transfer layout between our mip images
+            barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+            barrier.newLayout = vk::ImageLayout::eTransferSrcOptimal;
+            // src referring to the previous mip level image; dst referring to the new mip level image we're creating
+            // src needs to have finished being written to before we can read from it.
+            barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+            barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+
+            // the logic with the barrier is that we are waiting for the mip level i - 1 image to be written to:
+            // the transition'll wait for i-1 (source mip level -- destination is i) to be filled either from the previous blit command, or from vkCmdCopyBufferToImage
+            commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, barrier);
+
+            // specify the regions that'll be used in the blit operation
+            // [0] the beginning (0,0,0 indicating the 'start of the image); [1] until when -- it's literally just offset, simple.
+            vk::ArrayWrapper1D<vk::Offset3D, 2> offsets, dstOffsets;
+            // offsets is the region of the mip image we're creating from (hence why it's the size of the current mip image)
+            offsets[0] = vk::Offset3D(0, 0, 0);
+            offsets[1] = vk::Offset3D(mipWidth, mipHeight, 1);
+            // and dstOffsets is the region of the mip image we're creating to (hence why it's dimensions are cut in half from the current mip image )
+            dstOffsets[0] = vk::Offset3D(0, 0, 0);
+            dstOffsets[1] = vk::Offset3D(
+                mipWidth > 1 ? mipWidth / 2 : 1, // x (we are dividing by 2 because each mip level is half the size of the previous, until we're under 1texel, hence >1)
+                mipHeight > 1 ? mipHeight / 2 : 1, // y (we are dividing by 2 because each mip level is half the size of the previous, until we're under 1texel, hence >1)
+                1 // z (1 because it's a 2D image -- a 2d image has a depth/z-level of one)
+            );
+
+            vk::ImageBlit blit
+            {
+                // Subresource is literally just what kind of "subresource" (depth, colour, etc) to modify from the image. In our case, we're targetting Color data for the mipmaps as we'll be needing color to result in our mip images.
+                // So source: the data we want from, and destination: wthe data we want to.
+                .srcSubresource = vk::ImageSubresourceLayers( vk::ImageAspectFlagBits::eColor, i - 1, 0, 1),
+                .srcOffsets = offsets, // the 3D region where data will be 'blitted' from
+                .dstSubresource = vk::ImageSubresourceLayers( vk::ImageAspectFlagBits::eColor, i, 0, 1),
+                .dstOffsets = dstOffsets // the 3D region where data will be 'blitted' to
+            };
+
+            // for the src/dstImage params, we're re-using the same image because we're just making the same image but through different mip levels.
+            // We transitioned every mip image to begin as eTransferSrcOptimal with the pipeline barrier, we're then transitioning it to eTransferDstOptimal.
+            // If we were to use a "dedicated transfer queue", vkCmdBlitImage (aka blitImage()) would have to be submitted to a queue with graphics capability.
+            // blit is the image blit to occur (literally right above): we are saying the source image (inc. its offset) becomes its dst blit (which contains the /2 of the previous image) -- this is crucial.
+            // the filter is similar/identical to the texture Sampler -- same usage, it's for interpolation of the nearest pixels of that one pixel we're modifying
+            commandBuffer.blitImage(
+                image,
+                vk::ImageLayout::eTransferSrcOptimal,
+                image,
+                vk::ImageLayout::eTransferDstOptimal,
+                { blit },
+                vk::Filter::eLinear
+            );
+
+            // Finally, we transition the mip image to shader read for maximum performance!
+            // We're just reusing the same barrier but modifying the fields -- same logic as the start of the loop.
+            barrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
+            barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+
+            barrier.srcAccessMask = vk::AccessFlagBits::eTransferRead;
+            barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+
+            commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader, {}, {}, {}, barrier);
+
+            // Then for the next iteration to create the following mip level image, we need to cut mipheight/width in half so the following is correct
+            // this is because we use mipWidth/Height to define how many pixels to offset to. (we're checking if its above 1 because again a mip image can not be less than 1 pixel)
+            if (mipWidth > 1)
+                mipWidth /= 2;
+            if (mipHeight > 1)
+                mipHeight /= 2;
+        }
+
+        // Finally, we transition the mip image to shader read for maximum performance!
+        // We're just reusing the same barrier but modifying the fields -- same logic as the start of the loop.
+            // WE ARE ONLY TRANSITIONING MIPLevels-1 TO ESHADERREAD -- EVERYTHING ELSE IS UNMODIFIED
+            // THIS IS BECAUSE SUBRESOURCERANGE.LEVELCOUNT IS 1, IT SPECIFIES TO ONLY MODIFY 1!
+            // the reason we are doing this is because the last mip level wasn't transitioned, so we have to manually set it like this outside the loop
+            // its literally the same logic as the loop, though.
+        barrier.subresourceRange.baseMipLevel = mipLevels - 1;
+
+        barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+        barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+
+        barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+        barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+
+        commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader, {}, {}, {}, barrier);
+
+        // The reason we're transitioning these one by one (instead of just setting .levelCount to # of mip images) is because we set these to eTransferDstOptimal and eTransferSrcOptimal
+        // They're not consistent: for speed reasons, we set these things to different image layouts to read/write to one another quickly.
+        // IF hypothetically EVERY image layout was the same, it'd be quicker and cleaner and EASIER to just modify .levelCount and run a single pipelineBarrier command. (which is what we do before generateMipmaps w/ transition image layout!)
+
+        endSingleTimeCommands(commandBuffer);
     }
 
 

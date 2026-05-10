@@ -33,14 +33,14 @@ ${TINY}
 ${GLFW}
 ${SLANG}/include
 "C:/stb" # lazy
-"C:/mSys Stuff/ucrt64/include" # lazy
+"C:/mSys_Stuff/ucrt64/include" # lazy
 )
 
 # Where we find libs (the actual code).
 target_link_libraries(main PRIVATE
 ${VULKAN_SDK}/Lib/vulkan-1.lib
 ${SLANG}/lib/slang.lib
-"C:/mSys Stuff/ucrt64/lib/libglfw3.a" # lazy
+"C:/mSys_Stuff/ucrt64/lib/libglfw3.a" # lazy
 )
 
 # ripped it. idea is that we're running the 'COMMAND' every cmake build (executes it before we build main, giving us slang.spv)

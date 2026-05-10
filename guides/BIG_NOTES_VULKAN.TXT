@@ -750,4 +750,32 @@ For example, Mip level 0 is the original image (unmodified, original size -- hig
     Mip levels after 0 are commonly referred to as the 'Mip Chain'
 
 The number of available mip levels is specified within the creation of a VkImage object through vk::ImageCreateInfo
-    
+
+Pseudocode for LoD: how the sampler selects an appropriate mip level based on how far the camera is (level of detail):
+
+    lod = getLodLevelFromScreenSize(); //smaller when the object is close, may be negative
+    lod = clamp(lod + mipLodBias, minLod, maxLod);
+
+    level = clamp(floor(lod), 0, texture.mipLevels - 1);  //clamped to the number of mip levels in the texture
+
+    if (mipmapMode == vk::SamplerMipmapMode::eNearest) {
+        color = sample(level);
+    } else {
+        color = blend(sample(level), sample(level + 1));
+    }
+
+IF the samplerInfo.mipmapMode is VK_SAMPLER_MIPMAP_MODE_LINEAR (vk::SamplerMipmapMode::eLinear), the 2 bordering levels are linearly blended (colours are blended together pixel by pixel)
+IF instead of our samplerInfo.mipmapMode IS VK_SAMPLER_MIPMAP_MODE_NEAREST (vk::SamplerMipmapMode::eNearest), lod directly selects the mip level (floor'd) to sample from.
+
+Also some more pseudocode, the sampling itself is also directly affected by lod.
+
+if (lod <= 0) {
+    color = readTexture(uv, magFilter);
+} else {
+    color = readTexture(uv, minFilter);
+}
+
+If the object is close to the camera, vk::SamplerCreateInfo::magFilter is used as the filter. If the object is further from the camera, vk::SamplerCreateInfo::minFilter is used.
+    (where min/mag filter can be eNearest or eLinear -- which is how to interpolate neighbouring pixels to get a final colour)
+
+Normally, lod is non-negative, and is only 0 when close the camera. vk::SamplerCreateInfo::mipLodBias lets us force Vulkan to use lower lod and level than it would normally use.
