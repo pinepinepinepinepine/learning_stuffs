@@ -1,4 +1,5 @@
 #include "vertex.cpp"
+#include <bitset>
 
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
@@ -137,6 +138,14 @@ class HelloTriangleApplication
     vk::raii::DeviceMemory depthImageMemory = nullptr;
     vk::raii::ImageView depthImageView = nullptr;
 
+    // the same gimmick as above, but this time to create a MULTISAMPLING BUFFER
+    // the REASON we have to do this is because our current image buffer only has ONE sample per pixel
+    // So, we create a color image buffer 'offscreen' to first sample to as it'll have multiple samples per pixel,
+    // AND THEN only after we get the blended, multisampled colours per pixel, we move it to the normal image buffer to then get rendered to the screen.
+    VkImage colorImage = nullptr;
+    vk::raii::DeviceMemory colorImageMemory = nullptr;
+    vk::raii::ImageView colorImageView = nullptr;
+
     vk::raii::Sampler textureSampler = nullptr; // the texture sampler: see big_notes, but in order to get a final texture, you sample it (applying filtering and transformations) from the texture image view.
 
     // see big_notes for an elaboration.
@@ -146,6 +155,9 @@ class HelloTriangleApplication
     std::vector<vk::raii::Fence> drawFence;                    // To ensure only one frame is rendered and presented at a time.
         // Similarily with a vector of command buffers, every frame needs its own respective semaphore and fence to track it, hence we're making it a vector.
     uint32_t wait_frameIndex = 0; // To assign semaphores their respective frames to track.
+
+    // Multisampling! See big_notes for an explanation on multisampling -- MSAA = Multisampling Antialiasing
+    vk::SampleCountFlagBits msaaSamples = vk::SampleCountFlagBits::e1;
 
     bool framebufferResized = false;
 
@@ -211,6 +223,7 @@ class HelloTriangleApplication
 
 
         createDepthResources(); // create the resources for our depth buffer
+        createColorResources(); // create the resources for our colour buffer (used for multisampling, has multiple samples per pixel) buffer.
 
         createTextureImage();
         createTextureImageView();
@@ -441,6 +454,35 @@ class HelloTriangleApplication
         some_handy_printer( &context, &requiredLayers, &requiredExtensions );
     }
 
+    // gets and returns the maximum amount of samples per pixel that our graphics card supports.
+    vk::SampleCountFlagBits getMaxUsableSampleCount()
+    { // vk::SampleCountFlagBits
+        vk::PhysicalDeviceProperties physicalDeviceProperties = physicalDevice.getProperties();
+
+        vk::SampleCountFlags counts = physicalDeviceProperties.limits.framebufferColorSampleCounts & physicalDeviceProperties.limits.framebufferDepthSampleCounts;
+
+        std::cout << "Supported maximum sample amount per pixel (BITMASK)" << std::endl;
+        std::cout << "Color Sample Count: " << std::bitset<32>(static_cast<uint32_t>(physicalDeviceProperties.limits.framebufferColorSampleCounts)) << std::endl;
+        std::cout << "Color Depth Count:  " << std::bitset<32>(static_cast<uint32_t>(physicalDeviceProperties.limits.framebufferDepthSampleCounts)) << std::endl;
+
+
+        // this feels kinda barbaric but it's literally just checking if that exact bit is present, then returning it. for now our max is only 8x (so 8 samples per pixel)
+        if (counts & vk::SampleCountFlagBits::e64) { return vk::SampleCountFlagBits::e64; }
+        if (counts & vk::SampleCountFlagBits::e32) { return vk::SampleCountFlagBits::e32; }
+        if (counts & vk::SampleCountFlagBits::e16) { return vk::SampleCountFlagBits::e16; }
+
+        if (counts & vk::SampleCountFlagBits::e8)
+        {
+            std::cout << "Maximum support is 8x!\n";
+            return vk::SampleCountFlagBits::e8;
+        }
+
+        if (counts & vk::SampleCountFlagBits::e4) { return vk::SampleCountFlagBits::e4; }
+        if (counts & vk::SampleCountFlagBits::e2) { return vk::SampleCountFlagBits::e2; }
+
+        return vk::SampleCountFlagBits::e1;
+    }
+
 
     bool checkDeviceQueueSupport_bitwise( vk::raii::PhysicalDevice const& physicalDevice )
     {
@@ -540,6 +582,10 @@ class HelloTriangleApplication
 			throw std::runtime_error("failed to find a suitable GPU!");
 		}
 		physicalDevice = *devIter; // If we have multiple GPUs, the recommended way is to filter them based on whats better -- see big_notes for some examples. We're just choosing the first one found.
+
+        // see the function, but it's really straight forward, just for the physicalDevice we've selected, we get its maximum supported sample count per pixel, and then set that value to msaaSamples.
+        msaaSamples = getMaxUsableSampleCount();
+
         std::cout << "using " << physicalDevice.getProperties().deviceName << " as our physical device!\n";
 	}
 
@@ -573,8 +619,10 @@ class HelloTriangleApplication
 
         // Not needed for now. Come back to this when stuff gets interesting (i guess?) -- initializes itself to vk::False
         // It specifies the used device features.
-        vk::PhysicalDeviceFeatures deviceFeatures;
-
+        // vk::PhysicalDeviceFeatures deviceFeatures;
+        // For an example on how to use this instead of using the structure chain, you'd specify it like this, and then pass it into vk::DeviceCreateInfo
+        // deviceFeatures.sampleRateShading = vk::True;
+        // However, this is OLD (pre 1.1 vulkan), now you just resolve it like how we did w/ chains!
 
             // We ACTUALLY enable features/extensions here after querying them within isDeviceSuitable()
         // vk::PhysicalDeviceFeatures2 is the container for EVERYTHING including and beyond vulkan version 1.1 -- vk::PhysicalDeviceFeatures is 1.0
@@ -584,7 +632,9 @@ class HelloTriangleApplication
         // has a pNext field that can point to another unrelated feature struct, which is a "chain of feature requests" -- the vulkan C++ API provides a helper template vk::StructureChain to make this easier.
         // First step: we create a vk::StructureChain with 3 different feature structs, and for each different struct, we provide an initializer, assign them below with {}, seperating w/ comma
         vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
-            { .features = {.samplerAnisotropy = true } },                               // vk::PhysicalDeviceFeatures2: anistropic filtering is an optional device feature, so we need to enable it ourselves (otherwise validation layer msg).
+            { .features = { .sampleRateShading = true, .samplerAnisotropy = true } },
+                // And yay! with multisampling, we enabled sampleShading within the graphics pipeline, so we do this to allow it to be vk::True!
+                // vk::PhysicalDeviceFeatures2: anistropic filtering is an optional device feature, so we need to enable it ourselves (otherwise validation layer msg).
             { .shaderDrawParameters = true},   // vk::PhysicalDeviceVulkan11Features - UNMENTIONED IN DOCS: needed for shader creation otherwise warning -- we're just enabling it (we query'd support in isDeviceSuitable)
             { .synchronization2 = true, .dynamicRendering = true},      // vk::PhysicalDeviceVulkan13Features - enable the 'dynamic rendering' feature from Vulkan 1.3
             { .extendedDynamicState = true }   // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT - enable the 'extended dynamic state' feature from the extension struct
@@ -599,7 +649,8 @@ class HelloTriangleApplication
             .queueCreateInfoCount = 1,                                                      // the amount of queues we are creating
             .pQueueCreateInfos = &deviceQueueCreateInfo,                                    // Queue creation info for EACH family (YOU HAVE TO PASS A VECTOR/ARRAY OF vk::DeviceQueueCreateInfo.data(), SO APPEND EACH QUEUE FAMILY INTO A CENTRAL VECTOR, then .data() the vector)
             .enabledExtensionCount = static_cast<uint32_t>(requiredDeviceExtension.size()), // the number of device extensions we're enabling (FOR EXTENSIONS, IT'S VERY SIMILAR TO vk::InstanceCreateInfo's EXTENSION)
-            .ppEnabledExtensionNames = requiredDeviceExtension.data() };                    // the list of the names of the extensions to enable (HOWEVER, THIS DIFFERS FROM vk::InstanceCreateInfo BECAUSE THESE EXTENSIONS ARE GPU EXTENSIONS, NOT VULKAN API EXTENSIONS.)
+            .ppEnabledExtensionNames = requiredDeviceExtension.data()                      // the list of the names of the extensions to enable (HOWEVER, THIS DIFFERS FROM vk::InstanceCreateInfo BECAUSE THESE EXTENSIONS ARE GPU EXTENSIONS, NOT VULKAN API EXTENSIONS.)
+        };
             // some vulkan update made device-specific and instance validation layers inseperable, so they're now all vulkan instance layers (so adding .enabledLayerCount + ppEnabledLayerNames is obsolete, those go in instance creation)
                 // the EXTENSIONS are seperate, the LAYERS are not (layers are not shown above w/ vk::DeviceCreateInfo, its just an added member variable).
 
@@ -636,6 +687,9 @@ class HelloTriangleApplication
                 // https://vulkan-tutorial.com/Depth_buffering
         vkDestroyImage( *logicalDevice, depthImage, nullptr ); // this func also gets called on app exit -- we're fine.
 
+        // same logic but for the color buffer.
+        vkDestroyImage( *logicalDevice, colorImage, nullptr );
+
         swapChainImageViews.clear();
         swapChain = nullptr;
     }
@@ -668,6 +722,9 @@ class HelloTriangleApplication
 
         // the resolution of the depth buffer also needs to change whenever the window is resized, hence recreation:
         createDepthResources();
+
+        // the resolution of the multisampling color buffer also needs to change whenever the window is resized, hence recreation:
+        createColorResources();
 
         outputFile << get_current_time() << " | Finished the Recreation of the swap chain" << std::endl;
     }
@@ -1126,9 +1183,13 @@ class HelloTriangleApplication
                 // as an example, a pixel is a jar, and samples are the colours inside that jar; individual samples get their color from the base fragment (the defaulted color) , or from depth (whether or not its covered)
                 // for a fragment to get its FINAL colour, the samples are averaged for that one individual fragment.
         vk::PipelineMultisampleStateCreateInfo multisampling {
-            .rasterizationSamples = vk::SampleCountFlagBits::e1, // We are saying "we only want 1 sample per fragment", which means multi-sampling is disabled
-            .sampleShadingEnable = vk::False // determines whether the fragment shader runs for every fragment (=false) or every sample (=true) -- true has nicer colours and smoother edges, but it's greatly more expensive as it runs per SAMPLE (and every fragment can have multiple samples)
-        }; // we're revisiting this in another chapter.
+            .rasterizationSamples = msaaSamples, // How many samples we want per pixel!
+                // If, vk::SampleCountFlagBits::e1, we are saying "we only want 1 sample per fragment", which means multi-sampling is disabled
+            .sampleShadingEnable = vk::True, // determines whether the fragment shader runs for every fragment (=false) or every sample (=true) -- true has nicer colours and smoother edges, but it's greatly more expensive as it runs per SAMPLE (and every fragment can have multiple samples)
+            .minSampleShading = 0.2f // min fraction for sample shading; closer to one is smoother
+                // if .sampleShadingEnable = vk::False, we don't need this, so we'd remove it.
+        };  // if it's vk::True, we need to enable the feature sampleRateShading whenever creating the logical Device. (if it's false, we don't need to enable anything)
+                // https://docs.vulkan.org/tutorial/latest/10_Multisampling.html#_quality_improvements
 
 
             // Depth and Stencil Testing (TO DO: ELABORATED UPON LATER [SCRATCH IT! NOW!], we are [WERE PREVIOUSLY] passing nullptr within the pipeline creation)
@@ -1348,6 +1409,18 @@ class HelloTriangleApplication
                 // NEW WITH THE INCLUSION OF DEPTH: specify (instead of hard-coding) the image aspect, which means what kind of data pixels'll store (colour values, in our case)
         );
 
+        // Transition the multisampling color image to COLOR_ATTACHMENT_OPTIMAL similarily.
+        transition_image_layout(
+            colorImage,
+            vk::ImageLayout::eUndefined,
+		    vk::ImageLayout::eColorAttachmentOptimal,
+            vk::AccessFlagBits2::eColorAttachmentWrite,
+		    vk::AccessFlagBits2::eColorAttachmentWrite,
+            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		    vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+            vk::ImageAspectFlagBits::eColor
+        );
+
         // same logic as with the transition_image_layout() call above (but w/ the depth image).
         // HOWEVER. do notice we're transitioning the depthImage, NOT our swap chain image -- it's why we can call this subsequently after the previous call -- it's transitioning a different image!
         transition_image_layout(
@@ -1371,8 +1444,16 @@ class HelloTriangleApplication
             // second parameter is the same thing as w/ the first parameter, but instead of DEPTH values, it's STENCIL values. So, second param is the initial stencil value for each pixel. (NOT ELABORATED W/ THE TUTORIAL YET)
 
         vk::RenderingAttachmentInfo colourAttachmentInfo {
-            .imageView   = swapChainImageViews[ swapChain_imageIndex ], // what image view we're rendering to
+            .imageView   = colorImageView,                              // what image view we're rendering to
             .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,    // the image layout the image will be in during rendering.
+
+            // NEW WITH MULTISAMPLING! Prefixed with Resolve indicates the RESOLVED image (AFTER the initial rendering to imageView -- .imageView -> .resolveImageView -> final image)
+                // it renders the first .imageView (which is our multisampling image, has multiple samples), and then renders THAT result into .resolveImageView, which only has ONE sampler per pixel.
+                // its called resolved because Vulkan performs a 'resolve' operation onto the multisampled image (which has multiple samples, cant be displayed) into a single sample per pixel image.
+            .resolveMode        = vk::ResolveModeFlagBits::eAverage,            // we want to resolve FROM the initial .imageView w/ vk::ResolveModeFlagBits::eAverage (eAverage gets the average of all MSAA samples into a single pixel value)
+		    .resolveImageView   = swapChainImageViews[ swapChain_imageIndex ],  // we are resolving INTO our original (pre-MSAA) swapChainImageViews[ swapChain_imageIndex ] image view.
+		    .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,     // and the type of image layout we want of our new resolved image.
+
             .loadOp      = vk::AttachmentLoadOp::eClear,                // specifies what we'll do to our image BEFORE rendering (clearing it, which is filling it in fully)
             .storeOp     = vk::AttachmentStoreOp::eStore,               // what we'll do to the image AFTER rendering (we're just storing it for later use)
             .clearValue  = clearColor                                   // the color used for the eClear operation (the screen will first be rendered fully opaque black (previously)... NOW PINK!)
@@ -1520,9 +1601,6 @@ class HelloTriangleApplication
         // the depth image's format we'll be using
         vk::Format depthFormat = findDepthFormat();
 
-        // HACK.
-        //vkDestroyImage(*logicalDevice, depthImage, nullptr);
-
         // A depth image is an attachment (similarily to a color attachment) that contains a depth value for every pixel (fragment)
             // the depth buffer is the depth image's memory (again, VERY similar to other calls to createImage -- it's the same thing, just for depth).
         // I'm not re-explaining createImage's parameters, just check the other comments -- you should know by now, me.
@@ -1530,6 +1608,7 @@ class HelloTriangleApplication
             swapChain_Extent_ImageResolution.width,
             swapChain_Extent_ImageResolution.height,
             1, // mip levels -- we don't want mipmapping, so 1 = default image
+            msaaSamples, // APPARENTLY, our depth image WILL be using multiple samples per pixel! wtf!
             depthFormat, // the format will specify what the image data will contain
             vk::ImageTiling::eOptimal,
             vk::ImageUsageFlagBits::eDepthStencilAttachment, // and this will specify what we intend on using it
@@ -1544,6 +1623,27 @@ class HelloTriangleApplication
             // this is because we're making a depth image that'll store depth values, NOT colour data.
                 // for a visualization: https://en.wikipedia.org/wiki/Depth_map
                     // NOTE: THE DEPTH IMAGE GENERATED WON'T BE BLACK/WHITE (by default), it LITERALLY just contains data per pixel, NOTHING visual, if you want to mimic the images on wikipedia, you'll have to assign colour based on depth values.
+    }
+
+    void createColorResources()
+    {
+        vk::Format colourFormat = swapChain_surfaceFormat.format;
+
+        // same gimmick with these 2 expressions as w/ the createDepthResource and createTextureImage
+        createImage(
+            swapChain_Extent_ImageResolution.width,
+            swapChain_Extent_ImageResolution.height,
+            1,
+            msaaSamples, // and hey! our number of samples per pixel!
+            colourFormat,
+            vk::ImageTiling::eOptimal,
+            vk::ImageUsageFlagBits::eTransientAttachment | vk::ImageUsageFlagBits::eColorAttachment, // We're using this as a color attachment (render colour pixels onto this image),
+            // and the first attachment indicates that the image will only temporarily live as a render pass, and to discard it afterwards (we won't be needing its contents after we bridge it to the image buffer)
+            vk::MemoryPropertyFlagBits::eDeviceLocal, // Memory Type: won't be communicating with the CPU (hence local)
+            colorImage,
+            colorImageMemory
+        );
+        colorImageView = createImageView(colorImage, colourFormat, vk::ImageAspectFlagBits::eColor, 1);
     }
 
     // This function is used to transition the image layout before and after rendering
@@ -1652,7 +1752,7 @@ class HelloTriangleApplication
         samplerInfo.minLod = 0.0f;
         samplerInfo.maxLod = vk::LodClampNone; // update: we changed this away from 0.0f because we want to actually have a lod range: here it's uncapped and won't be clamped.
 
-        // comment this if we want to see mip images in effect
+        // comment this if we want to see mip images in effect (but it's hard to see because we don't really have... range with a single object, kinda)
         // it's a range of minLod to maxLod, where the further you are, the less level of detail (lod) is required -- here we just set the minimum to force lesser lod.
         samplerInfo.minLod = static_cast<float>(mipLevels / 2);
 
@@ -1728,6 +1828,7 @@ class HelloTriangleApplication
             texWidth,
             texHeight,
             mipLevels, // mip levels -- we want to switch our texture image to a downscaled version whenever the model is far away.
+            vk::SampleCountFlagBits::e1, // our regular texture image isn't going to be multisampled (our colorImage will), so we just do 1 sample per pixel -- default!
             vk::Format::eR8G8B8A8Srgb,
             vk::ImageTiling::eOptimal,
             vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferSrc,
@@ -1900,7 +2001,7 @@ class HelloTriangleApplication
     }
 
 
-    void createImage( uint32_t width, uint32_t height, uint32_t mipLevels, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage,
+    void createImage( uint32_t width, uint32_t height, uint32_t mipLevels, vk::SampleCountFlagBits numSamples, vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage,
         vk::MemoryPropertyFlags properties, VkImage &image, vk::raii::DeviceMemory &imageMemory )
     {
         vk::ImageCreateInfo imageInfo {
@@ -1918,6 +2019,11 @@ class HelloTriangleApplication
             .sharingMode = vk::SharingMode::eExclusive // same thing: we want one queue family at a time to be utilized/own this.
             // https://docs.vulkan.org/tutorial/latest/06_Texture_mapping/00_Images.html#_texture_image
         };
+
+        // it's outside of the initialization because out of order and i cba.
+        // but it's just saying the number of samples PER pixel is equal to numSamples.
+        // For our depth buffer and image buffer, they simply used one per pixel, but w/ multisampling, we need multiple per!
+        imageInfo.samples = numSamples;
 
         vkCreateImage( *logicalDevice, imageInfo, nullptr, &image );
 

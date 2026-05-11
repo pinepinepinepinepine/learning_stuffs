@@ -779,3 +779,12 @@ If the object is close to the camera, vk::SamplerCreateInfo::magFilter is used a
     (where min/mag filter can be eNearest or eLinear -- which is how to interpolate neighbouring pixels to get a final colour)
 
 Normally, lod is non-negative, and is only 0 when close the camera. vk::SamplerCreateInfo::mipLodBias lets us force Vulkan to use lower lod and level than it would normally use.
+
+========
+
+Multisampling is using multiple sample points per pixel to determine the final colour instead of "if line is present within this pixel, fill that pixel"
+Having multiple samples per pixel allows us to STILL fill that pixel, BUT allows us to change that one pixels colour based on how many samples are within that line
+    this means we can make it transparent based upon how many samples are triggered.
+
+No Multisampling: https://docs.vulkan.org/tutorial/latest/_images/images/aliasing.png
+MSAA: https://docs.vulkan.org/tutorial/latest/_images/images/antialiasing.png
