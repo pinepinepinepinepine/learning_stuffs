@@ -788,3 +788,5 @@ Having multiple samples per pixel allows us to STILL fill that pixel, BUT allows
 
 No Multisampling: https://docs.vulkan.org/tutorial/latest/_images/images/aliasing.png
 MSAA: https://docs.vulkan.org/tutorial/latest/_images/images/antialiasing.png
+
+For a comparison between Sample Shading on/off: https://docs.vulkan.org/tutorial/latest/_images/images/sample_shading.png
