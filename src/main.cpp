@@ -4,6 +4,9 @@
 constexpr uint32_t WIDTH = 800;
 constexpr uint32_t HEIGHT = 600;
 
+// number of particles to create.
+constexpr uint32_t PARTICLE_COUNT = 8192;
+
 // path to the model's texture and path (duh)
 const std::string MODEL_PATH = "../models/spin.obj";
 const std::string MODEL_TEXTURE_PATH = "../textures/spinT.png";
@@ -27,6 +30,14 @@ constexpr bool enableValidationLayers = false;
 #else
 constexpr bool enableValidationLayers = true;
 #endif
+
+
+struct Particle
+{
+    glm::vec2 position;
+	glm::vec2 velocity;
+	glm::vec4 color;
+};
 
 class HelloTriangleApplication
 {
@@ -101,6 +112,13 @@ class HelloTriangleApplication
     vk::raii::PipelineLayout pipelineLayout = nullptr;
     vk::raii::Pipeline graphicsPipeline = nullptr; // the pipeline ITSELF!
 
+    std::vector<vk::raii::DescriptorSet> computeDescriptorSets;
+
+    // the descriptor for the compute buffers and the compute pipeline
+    vk::raii::DescriptorSetLayout computeDescriptorSetLayout = nullptr;
+	vk::raii::PipelineLayout      computePipelineLayout      = nullptr;
+	vk::raii::Pipeline            computePipeline            = nullptr;
+
     // A command pool manages the memory that is used to store the command buffers, and the command buffers are allocated from the command pool.
     vk::raii::CommandPool commandPool = nullptr;
     // Command Buffers are objects that are used to record commands which can be submitted through the device's queue for the command buffer commands' execution.
@@ -120,6 +138,15 @@ class HelloTriangleApplication
     std::vector<vk::raii::Buffer> uniformBuffers;
     std::vector<vk::raii::DeviceMemory> uniformBuffersMemory;
     std::vector<void*> uniformBuffersMapped; // a pointer to the memory region so we can write data to it later on.
+
+    // uniform buffers for the compute shader: i've no clue why we are doing this for now, but im doing it anyways
+    std::vector<vk::raii::Buffer> shaderUniformBuffers;
+    std::vector<vk::raii::DeviceMemory> shaderUniformBuffersMemory;
+    std::vector<void*> shaderUniformBuffersMapped;
+
+    // Similar to the "frames of flight" uniform buffers: we create a buffer per frame in flight so we can keep the GPU busy.
+    std::vector<vk::raii::Buffer> shaderStorageBuffers;
+    std::vector<vk::raii::DeviceMemory> shaderStorageBuffersMemory;
 
     // mip levels for all the different mip images we want to create! see big_notes_vulkan for more elaboration.
     // we need to calculate the number of mip levels we wish to create from the original dimensions of the image.
@@ -219,6 +246,8 @@ class HelloTriangleApplication
 
         createGraphicsPipeline(); // For an explanation of the graphics pipeline, see BIG_NOTES
 
+        createComputePipeline(); // compute pipeline is a seperate pipeline to the graphics pipeline. it's used to have the gpu itself run general, cpu-like commands for computation -- you can also modify images with the compute shader.
+
         createCommandPool(); // see function for elaboration
 
 
@@ -237,6 +266,8 @@ class HelloTriangleApplication
         createIndexBuffer(); // see function for elaboration
 
         createUniformBuffers(); // see function for elaboration
+
+        createShaderStorageBuffers();
 
         createDescriptorPool();
 
@@ -495,7 +526,7 @@ class HelloTriangleApplication
 
         for ( const auto& availableQueueFamily : availableQueueFamilies )
         {
-            if ( availableQueueFamily.queueFlags & requiredQueues ) { // bitmasks contain data for MULTIPLE bools (flag bits in our case), hence why we don't have to iterate over multiple requiredQueues like w/ _iterate() -- we just check if it contains all of them.
+            if ( ( availableQueueFamily.queueFlags & requiredQueues ) == requiredQueues ) { // bitmasks contain data for MULTIPLE bools (flag bits in our case), hence why we don't have to iterate over multiple requiredQueues like w/ _iterate() -- we just check if it contains all of them.
                 std::cout << physicalDevice.getProperties().deviceName << " supports all our required queue families! (BITWISE)\n";
                 return true;
             }
@@ -597,6 +628,7 @@ class HelloTriangleApplication
         for ( uint32_t qfpIndex = 0; qfpIndex < queueFamilyProperties.size(); qfpIndex++ )
         {
         if ( (queueFamilyProperties[qfpIndex].queueFlags & vk::QueueFlagBits::eGraphics ) && // If the queue family supports eGraphics,
+            (queueFamilyProperties[qfpIndex].queueFlags & vk::QueueFlagBits::eCompute ) &&  // and if the queue family supports eCompute,
                 physicalDevice.getSurfaceSupportKHR( qfpIndex, *window_surface ) )           // and this queue family supports presenting images to the window surface...
             {
                 // then we've found a queue family that supports both graphics and present, set queueIndex as that queue we just found.
@@ -663,6 +695,9 @@ class HelloTriangleApplication
         // The second parameter is an int which represents what family index we want (so we want graphicsIndex here, we changed it to queueIndex to check if that queue family supports both eGraphics+Presenting Images to surfaces)
         // Third parameter: queue familys can have multiple queues, we're just selecting what exact queue we want in that family (starts from 0, we have 1 .QueueCount within the eGraphics family, so 0)
         graphicsQueue = vk::raii::Queue( logicalDevice, queueIndex, 0 ); // P.S, we're passing the second param from earlier (not from the logical_device itself) because vulkan doesn't store it.
+
+        // With the addition of the compute shader, if we REALLY wanted to make an asynchronous queue SOLELY for computes, we'd need to seperate the graphicsQueue from the computeQueue (so make one), and then pass whatever buffer command through to the computeQueue
+            // We queried that this queue index supports computes and graphics, so this is fine.
     }
 
     void createSwapChainImageViews()
@@ -981,16 +1016,42 @@ class HelloTriangleApplication
         // pre-17, though, just std::array<vk::DescriptorSetLayoutBinding, 2>
         std::array descriptorBindings { uboLayoutBinding, samplerLayoutBinding };
 
-
         // See big notes: Descriptor Set Layout specifies the resources that'll be accessible by containing multiple binding slots (DescriptorSetLayoutBinding) -- it's essentially a container of the individual bindings
-        vk::DescriptorSetLayoutCreateInfo layoutInfo {
+        vk::DescriptorSetLayoutCreateInfo graphicsLayoutInfo {
             .bindingCount = static_cast<uint32_t>( descriptorBindings.size() ), // the number of vk::DescriptorSetLayoutBindings within this Descriptor Set Layout (.bindingsCount is a uint32_t, .size() returns size_t)
             .pBindings = descriptorBindings.data() // the DescriptorSetLayoutBindings themselves (which can contain an array of bindings -- .pBindings is a container/array)
         };
 
         // As with a bunch of other Vulkan objects, use the create info and the device to actually create the vk::raii::DescriptorSetLayout object.
-        descriptorSetLayout = vk::raii::DescriptorSetLayout( logicalDevice, layoutInfo );
+        descriptorSetLayout = vk::raii::DescriptorSetLayout( logicalDevice, graphicsLayoutInfo );
+
+
+        // We're making a seperate compute descriptor because the graphics pipleline doesn't need access to the compute descriptors.
+
+        // AND ANOTHER DESCRIPTOR! this one contains our descriptor for the compute shader's buffer (SSBO - Shader Storage Buffer Object -- contains our particles).
+        vk::DescriptorSetLayoutBinding computeUBOLayoutBinding(
+            0,
+            vk::DescriptorType::eUniformBuffer, // it is another kind of uniform buffer, but it's just... used for something else!
+            1,
+            vk::ShaderStageFlagBits::eCompute, // we're using this buffer/descriptor within the compute shader within the pipeline. Also, you could raise this flag to be usable in multiple stages: for example, vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eCompute
+            nullptr
+        );
+
+        // We also need the SSBO, I have no idea why we made a uniform buffer binding, but whatever
+        vk::DescriptorSetLayoutBinding computeLayoutBinding     (1, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr);
+        vk::DescriptorSetLayoutBinding computeLayoutBinding_2   (2, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr);
+            // https://docs.vulkan.org/tutorial/latest/11_Compute_Shader.html#_descriptors: We need two because of this reason, but it seems odd, we'll see.
+
+        std::array compute_descriptorBindings { computeUBOLayoutBinding, computeLayoutBinding, computeLayoutBinding_2 };
+
+        vk::DescriptorSetLayoutCreateInfo computeLayoutInfo {
+            .bindingCount = static_cast<uint32_t>( compute_descriptorBindings.size() ), // the number of vk::DescriptorSetLayoutBindings within this Descriptor Set Layout (.bindingsCount is a uint32_t, .size() returns size_t)
+            .pBindings = compute_descriptorBindings.data() // the DescriptorSetLayoutBindings themselves (which can contain an array of bindings -- .pBindings is a container/array)
+        };
+
+        computeDescriptorSetLayout = vk::raii::DescriptorSetLayout( logicalDevice, computeLayoutInfo );
     }
+
 
     void createDescriptorPool()
     {
@@ -999,14 +1060,19 @@ class HelloTriangleApplication
         vk::DescriptorPoolSize uboPoolSize( vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT );
         vk::DescriptorPoolSize samplerPoolSize( vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT );
 
-        std::array total_poolSize { uboPoolSize, samplerPoolSize };
+        // We're making more descriptors for the compute pipeline, hence:
+        vk::DescriptorPoolSize computeUBOPoolSize( vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT );
+        vk::DescriptorPoolSize computePoolSize( vk::DescriptorType::eStorageBuffer, MAX_FRAMES_IN_FLIGHT * 2 );
+
+        std::array total_poolSize { uboPoolSize, samplerPoolSize, computeUBOPoolSize, computePoolSize };
         // whenever we call vkAllocateDescriptorSets to allocate the descriptor sets, sometimes we might run out of memory if we fuck up, but sometimes the driver'll automatically fix it for us
         // however sometimes it doesn't do this, and validation layers will NOT catch this and print it out... so just be mindful as it can work on some machines, but not on others -- just don't fuck up to begin with
         // some new vulkan update also eliminates the need to specify .descriptorCount for creation of the descriptor pool, but it's best practice to do so, so just include it.
 
         vk::DescriptorPoolCreateInfo poolInfo {
             .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, // Flags to give to the pool: eFreeDescriptorSet means we can "free" (delete) descriptors individually instead of having to free the whole pool. We don't use this, so you can also just leave this at 0, but whatever.
-            .maxSets = MAX_FRAMES_IN_FLIGHT, // the maximum number of descriptor >SETS< that can be allocated from this pool (we do NOT need to change this even w/ the inclusion of samplerPoolSize because each SET contains BOTH ubo and sampler descriptors -- we don't need 6, 3 is fine because for every descriptor set there's a UBO + sampler)
+            .maxSets = MAX_FRAMES_IN_FLIGHT * 2, // the maximum number of descriptor >SETS< that can be allocated from this pool (we do NOT need to change this even w/ the inclusion of samplerPoolSize because each SET contains BOTH ubo and sampler descriptors -- we don't need 6, 3 is fine because for every descriptor set there's a UBO + sampler)
+                // with the addition of compute layout, we now * 2 it because we've 2 descriptor sets... hence *2... duh.
             .poolSizeCount = static_cast<uint32_t>( total_poolSize.size() ), // the number of pool sizes we're using (.poolSizeCount is a uint32_t, .size() returns size_t)
             .pPoolSizes = total_poolSize.data() // the pool size themselves
         };
@@ -1017,18 +1083,29 @@ class HelloTriangleApplication
     void createDescriptorSets()
     {
         // Makes a vector of size MAX_FRAMES_IN_FLIGHT, where all the elements are a pointer of the same descriptorSetLayout
-        std::vector<vk::DescriptorSetLayout> layouts( MAX_FRAMES_IN_FLIGHT, *descriptorSetLayout );
+        std::vector<vk::DescriptorSetLayout> graphics_layouts( MAX_FRAMES_IN_FLIGHT, *descriptorSetLayout );
 
         vk::DescriptorSetAllocateInfo allocInfo {
             .descriptorPool = descriptorPool, // Where the descriptor set will be allocated from
-            .descriptorSetCount = static_cast<uint32_t>( layouts.size() ), // the number of descriptor sets to create
-            .pSetLayouts = layouts.data() // what descriptor set layout each descriptor set will reference
+            .descriptorSetCount = static_cast<uint32_t>( graphics_layouts.size() ), // the number of descriptor sets to create
+            .pSetLayouts = graphics_layouts.data() // what descriptor set layout each descriptor set will reference
         };
 
         descriptorSets.clear(); // same gimmick, inconsequential rn.
-
         // Now each descriptor set will individually reference a single descriptor set layout -- the descriptor set does NOT reference the uniform buffer yet, the layout is simply stating what the set will contain
         descriptorSets = logicalDevice.allocateDescriptorSets( allocInfo );
+
+        // and now for the compute descriptors -- it's the same damn logic, me
+        std::vector<vk::DescriptorSetLayout> compute_layouts( MAX_FRAMES_IN_FLIGHT, *computeDescriptorSetLayout );
+
+        vk::DescriptorSetAllocateInfo compute_allocInfo {
+            .descriptorPool = descriptorPool, // we're reusing the descriptor pool, we made enough space.
+            .descriptorSetCount = static_cast<uint32_t>( compute_layouts.size() ),
+            .pSetLayouts = compute_layouts.data()
+        };
+
+        computeDescriptorSets.clear(); // it's a vector, make sure it's empty.
+        computeDescriptorSets = logicalDevice.allocateDescriptorSets( compute_allocInfo );
 
         // The descriptors (resources) need to be actually created for every set, so iterate over the descriptor sets to populate them with actual resources/data (descriptors)
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
@@ -1044,6 +1121,27 @@ class HelloTriangleApplication
                 .sampler = textureSampler, // the resource itself
                 .imageView = textureImageView, // what texture image view itself
                 .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal // what layout the underlying texture vkImage is using
+            };
+
+            vk::DescriptorBufferInfo computeBufferInfo_ubo
+            {
+                .buffer = shaderUniformBuffers[i],
+                .offset = 0,
+                .range = sizeof(Particle) * PARTICLE_COUNT
+            };
+
+            vk::DescriptorBufferInfo computeBufferInfo_CurrentFrame
+            {
+                .buffer = shaderStorageBuffers[i],
+                .offset = 0,
+                .range = sizeof(Particle) * PARTICLE_COUNT
+            };
+
+            vk::DescriptorBufferInfo computeBufferInfo_PreviousFrame
+            {
+                .buffer = shaderStorageBuffers[(i - 1) % MAX_FRAMES_IN_FLIGHT], // this mess is here because it's the index for the previous buffer, yea.
+                .offset = 0,
+                .range = sizeof(Particle) * PARTICLE_COUNT
             };
 
             vk::WriteDescriptorSet uboDescriptorWrite {
@@ -1068,8 +1166,43 @@ class HelloTriangleApplication
                 .pImageInfo = &samplerInfo // and the sampler descriptor (resource) itself.
             }; // the only notable thing compared to uboDescriptorWrite is that we use .pImageInfo for sampler descriptors instead of .pBufferInfo.
 
+
+            // not making descriptor binding #0 because i have no idea wtf it is for -- NEVERMIND I GUESS WE MIGHT AS WELL, HAVE NO CLUE WTF IT IS FOR THOUGH
+            // WE MIGHT HAVE TO MAKE A SEPERATE DESCRIPTOR SET BECAUSE THE COMPUTE PIPELINE IS SEPERATE, WHY WOULD IT NEED THE UBO OR SAMPLER?
+
+            vk::WriteDescriptorSet computeBufferDescriptorWrite_ubo
+            {
+                .dstSet = computeDescriptorSets[i],
+                .dstBinding = 0,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eUniformBuffer,
+                .pBufferInfo = &computeBufferInfo_ubo
+            };
+
+            vk::WriteDescriptorSet computeBufferDescriptorWrite_CurrentFrame
+            {
+                .dstSet = computeDescriptorSets[i],
+                .dstBinding = 1,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eStorageBuffer,
+                .pBufferInfo = &computeBufferInfo_CurrentFrame
+            };
+
+            vk::WriteDescriptorSet computeBufferDescriptorWrite_PreviousFrame
+            {
+                .dstSet = computeDescriptorSets[i],
+                .dstBinding = 2,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eStorageBuffer,
+                .pBufferInfo = &computeBufferInfo_PreviousFrame
+            };
+
             // and again as with the other two descriptor functions, put it into an array and then update it (or create it w/ the other ones) below.
-            std::array descriptorWrites { uboDescriptorWrite, samplerDescriptorWrite };
+            // we can combine the graphics and compute here because we've already differentiated them via dstSet -- so we just update them individually w/o influence from another.
+            std::array descriptorWrites { uboDescriptorWrite, samplerDescriptorWrite, computeBufferDescriptorWrite_CurrentFrame, computeBufferDescriptorWrite_PreviousFrame };
 
             // first param: describes what to update (so, we're updating the information above)
             // second param is to copy discriptors to each other, which we're not doing.
@@ -1294,6 +1427,38 @@ class HelloTriangleApplication
         // Second Parameter is an optional vk::raii::PipelineCache object, which can store and reuse relevant pipeline creation data across multiple pipeline constructions -- elaborated later within the 'pipeline cache' chapter.
         // Third parameter, vk::StructureChain sets up pNext between the structs (ctrl f above), all we have to do is point to the first within its chain and Vulkan'll point to the following struct via pNext!
         graphicsPipeline = vk::raii::Pipeline( logicalDevice, nullptr, pipeline_info.get<vk::GraphicsPipelineCreateInfo>() );
+    }
+
+    void createComputePipeline()
+    {
+        // copied this code from createGraphicsPipeline() -- it's the same thing!
+        // again, just to REALLY hammer it home, we MADE a seperate descriptor set to pass to the compute pipeline
+        // WE DO NOT WANT TO RE-USE/PASS THE GRAPHICS DESCRIPTORS BECAUSE THEY ARE NOT RELEVANT FOR THIS.
+        vk::PipelineLayoutCreateInfo computePipelineLayoutInfo
+        {
+            .setLayoutCount = 1,
+            .pSetLayouts = &*computeDescriptorSetLayout
+        };
+        computePipelineLayout = vk::raii::PipelineLayout( logicalDevice, computePipelineLayoutInfo );
+
+        // this is the same logic as the graphics pipeline, the only difference is that the compute pipeline only has one stage: the compute shader stage.
+        auto shaderCode = readFile_SPIRVShaders("../shaders/slang.spv");
+        vk::raii::ShaderModule shaderModule = createShaderModule( shaderCode );
+
+        vk::PipelineShaderStageCreateInfo computeShader_StageInfo
+        {
+            .stage = vk::ShaderStageFlagBits::eCompute,
+            .module = shaderModule,
+            .pName = "compMain" // In our shader.slang file, we need to actually write compMain... so...
+        };
+
+        vk::ComputePipelineCreateInfo computePipelineInfo
+        {
+            .stage = computeShader_StageInfo, // again, literally just one stage.
+            .layout = computePipelineLayout // and similarily to the graphics pipeline, the descriptor set layouts within this pipeline. (what kind of data)
+        };
+
+        computePipeline = vk::raii::Pipeline( logicalDevice, nullptr, computePipelineInfo );
     }
 
 
@@ -1754,7 +1919,7 @@ class HelloTriangleApplication
 
         // comment this if we want to see mip images in effect (but it's hard to see because we don't really have... range with a single object, kinda)
         // it's a range of minLod to maxLod, where the further you are, the less level of detail (lod) is required -- here we just set the minimum to force lesser lod.
-        samplerInfo.minLod = static_cast<float>(mipLevels / 2);
+        //samplerInfo.minLod = static_cast<float>(mipLevels / 2);
 
         textureSampler = vk::raii::Sampler( logicalDevice, samplerInfo );
         // Unlike some objects, the textureSampler does not reference (or bind to) a specific vkImage (including vkImage) on creation.
@@ -2175,12 +2340,92 @@ class HelloTriangleApplication
     }
 
 
+    void createShaderStorageBuffers()
+    {
+        // Common practice to .clear the vector itself before we create it.
+        shaderStorageBuffers.clear();
+        shaderStorageBuffersMemory.clear();
+
+        // we need randomness for our particles, hence...
+        std::default_random_engine rndEngine((unsigned)time(nullptr));  // returns a random seed, based on the current time
+        std::uniform_real_distribution<float> rndDist(0.0f, 1.0f);      // gets a random number between 0 and 1
+
+        // then we make a vector of size PARTICLE_COUNT, which is 8192, because we want 8192 particles.
+        std::vector<Particle> particles(PARTICLE_COUNT);
+
+        for (auto& particle : particles)
+        {
+            // produces a float based upon the random engine (which becomes between 0 and 1, then square rooted)
+            float r = 0.25f * sqrtf(rndDist(rndEngine));
+
+            // which produces a value between 0 and 2pi [0, 6.2831]
+            float theta = rndDist(rndEngine) * 2.0f * 3.14159265358979323846f;
+
+            // where our particle will be placed on the imaginary, placement circle
+            float x = r * cosf(theta) * HEIGHT / WIDTH;
+            float y = r * sinf(theta);
+
+            // then simply we create the particle objects for this iteration
+            particle.position = glm::vec2(x, y);
+            // normalize creates a unit vector pointing to x, y (from 0,0), so we're using that as our velocity
+            // (but making it dramatically slower for when we calculate the speed of the projectile/particle, hence 0.000025f)
+            particle.velocity = normalize(glm::vec2(x,y)) * 0.00025f;
+            // and we're giving it a random colour too!
+            particle.color = glm::vec4(rndDist(rndEngine), rndDist(rndEngine), rndDist(rndEngine), 1.0f);
+        }
+
+            vk::DeviceSize bufferSize = sizeof(Particle) * PARTICLE_COUNT;
+
+        // Create a staging buffer used to upload data to the gpu
+        // these are LOCAL variables because the CPU will NOT have access to this buffer.
+            // we are effectively sending this ONE WAY
+        vk::raii::Buffer stagingBuffer({});
+        vk::raii::DeviceMemory stagingBufferMemory({});
+        createGPUBuffer(
+            bufferSize,
+            vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            stagingBuffer,
+            stagingBufferMemory
+        );
+
+        // We've seen this before: we're just copying the data from the particles container into the GPU buffer.
+        void* dataStaging = stagingBufferMemory.mapMemory(0, bufferSize);
+        memcpy(dataStaging, particles.data(), (size_t)bufferSize);
+        stagingBufferMemory.unmapMemory();
+
+        // Copy initial particle data to all storage buffers
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            vk::raii::Buffer shaderStorageBufferTemp({});
+            vk::raii::DeviceMemory shaderStorageBufferTempMemory({});
+
+            createGPUBuffer(bufferSize,
+                vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+                vk::MemoryPropertyFlagBits::eDeviceLocal,
+                shaderStorageBufferTemp,
+                shaderStorageBufferTempMemory
+            );
+
+            copyBuffer(stagingBuffer, shaderStorageBufferTemp, bufferSize);
+            shaderStorageBuffers.emplace_back(std::move(shaderStorageBufferTemp));
+            shaderStorageBuffersMemory.emplace_back(std::move(shaderStorageBufferTempMemory));
+
+            // So now our vector of buffers (shaderStorageBuffers + shaderStorageBuffersMemory) contain the same data.
+            // We're doing this because each buffer will have its own unique data at any given moment, so I suppose a central buffer wouldn't work (unlike uniform buffers).
+        }
+    }
+
+
     void createUniformBuffers()
     {
         // this clears the VECTOR container, not the memory itself -- only needed when we're recreating it, so its kinda pointless.
         uniformBuffers.clear();
         uniformBuffersMemory.clear();
         uniformBuffersMapped.clear();
+
+        shaderUniformBuffers.clear();
+        shaderUniformBuffersMemory.clear();
+        shaderUniformBuffersMapped.clear();
 
         // I'm not providing comments here --you should know by now-- but yeah it's the same thing as w/ all buffers.
         for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
@@ -2205,6 +2450,23 @@ class HelloTriangleApplication
             // This technique is called "persistent mapping": not having to map the buffer every time we need to update it increases performances, as mapping is not free
             // For an example, mapMemory(): for the vertex buffer, we call it and then close it -- this only occurs once to feed the data to the vertex buffer, so we don't need persistent mapping for that scenario.
             // However, the uniform buffer will be updated EVERY call to drawFrame() with new data, so persistent mapping is WAY better because we don't have to map and unmap the region of memory, which, again, isn't free.
+
+            vk::DeviceSize shaderUniformBufferSize = sizeof( UniformBufferObject );
+            vk::raii::Buffer shaderUniformBuffer({});
+            vk::raii::DeviceMemory shaderUniformBufferMemory({});
+
+            createGPUBuffer(
+                shaderUniformBufferSize,
+                vk::BufferUsageFlagBits::eUniformBuffer,
+                vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+                shaderUniformBuffer,
+                shaderUniformBufferMemory
+            );
+
+            shaderUniformBuffers.emplace_back( std::move( shaderUniformBuffer ) ); // we need std::move here because we want an rvalue, and vk::raii::Buffer uniformBuffer is not copyable
+            shaderUniformBuffersMemory.emplace_back( std::move( shaderUniformBufferMemory ) );
+            shaderUniformBuffersMapped.emplace_back( shaderUniformBuffersMemory[i].mapMemory( 0, shaderUniformBufferSize ) );
+
         }
     }
 

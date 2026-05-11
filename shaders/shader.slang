@@ -82,3 +82,23 @@ float4 fragMain(VertexOutput inVert) : SV_Target // SV_Target specifies the inde
     // texture colours are manipulated using the vertex colors
     //return float4( inVert.color * texture.Sample(inVert.fragmentTextureCoords).rgb, 1.0f);
 }
+
+// ill look into what the hell im looking at later, i JUST wanna compile this.
+[shader("compute")]
+[numthreads(256, 1, 1)]
+void compMain(uint3 threadId: SV_DispatchThreadID)
+{
+    return;
+    // uint index = threadId.x;
+
+    // particlesOut[index].particles.position = particlesIn[index].particles.position + particlesIn[index].particles.velocity.xy * ubo.deltaTime;
+    // particlesOut[index].particles.velocity = particlesIn[index].particles.velocity;
+
+    // // Flip movement at window border
+    // if ((particlesOut[index].particles.position.x <= -1.0) || (particlesOut[index].particles.position.x >= 1.0)) {
+    //     particlesOut[index].particles.velocity.x = -particlesOut[index].particles.velocity.x;
+    // }
+    // if ((particlesOut[index].particles.position.y <= -1.0) || (particlesOut[index].particles.position.y >= 1.0)) {
+    //     particlesOut[index].particles.velocity.y = -particlesOut[index].particles.velocity.y;
+    // }
+}
