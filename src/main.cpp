@@ -46,6 +46,8 @@ class HelloTriangleApplication
         outputFile << get_current_time() << " | Finished setting up the GLFW window" << std::endl; // endL flushes it out while making a new line over \n.
 		initVulkan();
         outputFile << get_current_time() << " | Finished setting up Vulkan" << std::endl;
+
+        auto now = std::chrono::steady_clock::now();
 		mainLoop();
         outputFile << get_current_time() << " | Exited the Main Loop" << std::endl;
 		cleanup();
@@ -144,6 +146,11 @@ class HelloTriangleApplication
     std::vector<vk::raii::DeviceMemory> shaderUniformBuffersMemory;
     std::vector<void*> shaderUniformBuffersMapped;
 
+    // compute shader debug buffers
+    std::vector<vk::raii::Buffer> debugShaderUniformBuffers;
+    std::vector<vk::raii::DeviceMemory> debugShaderUniformBuffersMemory;
+    std::vector<void*> debugShaderUniformBuffersMapped;
+
     // Similar to the "frames of flight" uniform buffers: we create a buffer per frame in flight so we can keep the GPU busy.
     std::vector<vk::raii::Buffer> shaderStorageBuffers;
     std::vector<vk::raii::DeviceMemory> shaderStorageBuffersMemory;
@@ -191,6 +198,12 @@ class HelloTriangleApplication
 
     double lastFrameTime = 0.0;
     double lastTime = 0.0f;
+
+    unsigned int frame_count = 0;
+    double frames_per_second;
+
+    double lastTime_FPS = 0.0f;
+
 
     bool framebufferResized = false;
 
@@ -292,18 +305,57 @@ class HelloTriangleApplication
     void mainLoop()
     {
         // GLFW's Win32 Message Loop equivalent (we're using GLFW for windowing -- vulkan can't natively). If an error or the closing of the window occurs, end the message loop.
+
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
+
+            // alternative way to track FPS
+            double currentTime_altfps = glfwGetTime();
             drawFrame();
+            double time_taken = glfwGetTime() - currentTime_altfps;
+            outputFile << "Frame by Frame FPS: " << 1 / time_taken << std::endl;
 
             double currentTime = glfwGetTime();
 			lastFrameTime      = (currentTime - lastTime) * 1000.0;
 			lastTime           = currentTime;
 
+            // stuff to track FPS
+            // we could alternatively check it frame by frame via seeing how fast it goes from
+            // entering draw frame, to exiting draw frame (so we can have it updated REALLY quickly)
+            double elapsed = currentTime - lastTime_FPS;
+            frame_count++;
+            if ( elapsed >= 1 )
+            {
+                frames_per_second = frame_count / elapsed;
+
+                outputFile << "FPS: " << frames_per_second << " (Frame Count: " << frame_count << ")" << std::endl;
+                frame_count = 0;
+                lastTime_FPS = 0;
+                lastTime_FPS = currentTime;
+            }
+
         }
 
         // Wait for the logicalDevice to finish operations before exiting the main loop.
         logicalDevice.waitIdle();
+    }
+
+
+    void debugParticlePrint( uint32_t currentImage )
+    {
+        // reinterpret_cast<Particle*> in C++ is like (Particle*) in C -- it's the same thing... SO WE CAN PERFORM POINTER ARITHMETICS/INCREMENTATION!
+        Particle* dataFromDebugSSBO = reinterpret_cast<Particle*>(debugShaderUniformBuffersMapped[currentImage]);
+
+        // yes this iterates 8192 times between EVERY single draw to drawFrame, causing the fps to DROP, but hey! debug!
+        for ( int i = 0; i < PARTICLE_COUNT; i++ )
+        {
+            outputFile << "Particle "
+            << dataFromDebugSSBO->velocity.x
+            << ": ("
+            << dataFromDebugSSBO->position.x << "x, "
+            << dataFromDebugSSBO->position.y << "y) | " << std::endl;
+            dataFromDebugSSBO++;
+        }
     }
 
     void drawFrame()
@@ -334,40 +386,44 @@ class HelloTriangleApplication
 
 
         // We're making a timeline semaphore here. The values here makes it so we can go from 0 -> 1 -> 2 -> 3 (where each section of the timeline waits for the previous)
+        // if we're testing w/o compute, remove compute wait values cause they affect timelineValue.
         uint64_t computeWaitValue    = timelineValue;
 		uint64_t computeSignalValue  = ++timelineValue;
 
         uint64_t graphicWaitValue    = timelineValue;
 		uint64_t graphicSignalValue  = ++timelineValue;
 
-        // this block here actually submits work for the compute pipeline.
-        updateComputeUniformBuffer( wait_frameIndex );
+        // this block here actually submits work for the compute pipeline -- we're putting it on a custom toggle.
+        if ( true )
+        {
+            updateComputeUniformBuffer( wait_frameIndex );
 
-        recordComputeCommandBuffer();
+            recordComputeCommandBuffer();
 
-        vk::PipelineStageFlags compute_waitDestinationStageMask( vk::PipelineStageFlagBits::eComputeShader );
+            vk::PipelineStageFlags compute_waitDestinationStageMask( vk::PipelineStageFlagBits::eComputeShader );
 
-            // the semaphore timeline, instead of being signaled/unsignaled, a signal means it's +1'd from what it was inputted with
-            // therefore it just continually adds +1 -- computeSignalValue is always +1 over computeWaitValue after its completed.
-        vk::TimelineSemaphoreSubmitInfo computeTimelineInfo{
-            .waitSemaphoreValueCount   = 1,
-			.pWaitSemaphoreValues      = &computeWaitValue,
-			.signalSemaphoreValueCount = 1,
-			.pSignalSemaphoreValues    = &computeSignalValue
-        };
+                // the semaphore timeline, instead of being signaled/unsignaled, a signal means it's +1'd from what it was inputted with
+                // therefore it just continually adds +1 -- computeSignalValue is always +1 over computeWaitValue after its completed.
+            vk::TimelineSemaphoreSubmitInfo computeTimelineInfo{
+                .waitSemaphoreValueCount   = 1,
+                .pWaitSemaphoreValues      = &computeWaitValue,
+                .signalSemaphoreValueCount = 1,
+                .pSignalSemaphoreValues    = &computeSignalValue
+            };
 
-        vk::SubmitInfo computeSubmitInfo{
-			.pNext                = &computeTimelineInfo,
-			.waitSemaphoreCount   = 1,
-			.pWaitSemaphores      = &*timelineSemaphore,
-			.pWaitDstStageMask    = &compute_waitDestinationStageMask,
-			.commandBufferCount   = 1,
-			.pCommandBuffers      = &*computeCommandBuffers[wait_frameIndex],
-			.signalSemaphoreCount = 1,
-			.pSignalSemaphores    = &*timelineSemaphore
-        };
+            vk::SubmitInfo computeSubmitInfo{
+                .pNext                = &computeTimelineInfo,
+                .waitSemaphoreCount   = 1,
+                .pWaitSemaphores      = &*timelineSemaphore,
+                .pWaitDstStageMask    = &compute_waitDestinationStageMask,
+                .commandBufferCount   = 1,
+                .pCommandBuffers      = &*computeCommandBuffers[wait_frameIndex],
+                .signalSemaphoreCount = 1,
+                .pSignalSemaphores    = &*timelineSemaphore
+            };
 
-        graphicsQueue.submit(computeSubmitInfo, nullptr);
+            graphicsQueue.submit(computeSubmitInfo, nullptr);
+        }
 
         // time for the graphics queue
         // this just updates the uniformBuffer's transformation matrices so that we can actually make the object spin.
@@ -430,6 +486,9 @@ class HelloTriangleApplication
 		{
 			throw std::runtime_error("failed to wait for semaphore!");
 		}
+
+        // see the function, but commenting this guy out because it's a debug thing that goes CRAAAAAZY.
+        //debugParticlePrint( wait_frameIndex );
 
         // update: DUE TO THE WAIT WAIT TO THE SEMAPHORE ABOVE, WE NO LONGER NEED TO TRACK IT WITH PRESENTINFOKHR (HENCE SEMAPHORE COUNT 0 + NULLPTR)
         // The way this works is VERY simple:
@@ -1137,7 +1196,9 @@ class HelloTriangleApplication
         vk::DescriptorSetLayoutBinding computeLayoutBinding_2   (2, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr);
             // https://docs.vulkan.org/tutorial/latest/11_Compute_Shader.html#_descriptors: We need two because of this reason, but it seems odd, we'll see.
 
-        std::array compute_descriptorBindings { computeUBOLayoutBinding, computeLayoutBinding, computeLayoutBinding_2 };
+        vk::DescriptorSetLayoutBinding computeLayoutBinding_debug   (3, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr);
+
+        std::array compute_descriptorBindings { computeUBOLayoutBinding, computeLayoutBinding, computeLayoutBinding_2, computeLayoutBinding_debug };
 
         vk::DescriptorSetLayoutCreateInfo computeLayoutInfo {
             .bindingCount = static_cast<uint32_t>( compute_descriptorBindings.size() ), // the number of vk::DescriptorSetLayoutBindings within this Descriptor Set Layout (.bindingsCount is a uint32_t, .size() returns size_t)
@@ -1157,7 +1218,7 @@ class HelloTriangleApplication
 
         // We're making more descriptors for the compute pipeline, hence:
         vk::DescriptorPoolSize computeUBOPoolSize( vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT );
-        vk::DescriptorPoolSize computePoolSize( vk::DescriptorType::eStorageBuffer, MAX_FRAMES_IN_FLIGHT * 2 );
+        vk::DescriptorPoolSize computePoolSize( vk::DescriptorType::eStorageBuffer, MAX_FRAMES_IN_FLIGHT * 3 );
 
         std::array total_poolSize { uboPoolSize, samplerPoolSize, computeUBOPoolSize, computePoolSize };
         // whenever we call vkAllocateDescriptorSets to allocate the descriptor sets, sometimes we might run out of memory if we fuck up, but sometimes the driver'll automatically fix it for us
@@ -1239,6 +1300,13 @@ class HelloTriangleApplication
                 .range = sizeof(Particle) * PARTICLE_COUNT
             };
 
+            vk::DescriptorBufferInfo computeBufferInfo_debug
+            {
+                .buffer = debugShaderUniformBuffers[i],
+                .offset = 0,
+                .range = sizeof(Particle) * PARTICLE_COUNT
+            };
+
             vk::WriteDescriptorSet uboDescriptorWrite {
                 .dstSet = descriptorSets[i], // the descriptor set we're updating
                 .dstBinding = 0, // the binding of the resource -- we set the uniform buffer to 0 through vk::DescriptorSetLayoutBinding::binding
@@ -1295,9 +1363,19 @@ class HelloTriangleApplication
                 .pBufferInfo = &computeBufferInfo_PreviousFrame
             };
 
+            vk::WriteDescriptorSet computeBufferDescriptorWrite_ddebug
+            {
+                .dstSet = computeDescriptorSets[i],
+                .dstBinding = 3,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eStorageBuffer,
+                .pBufferInfo = &computeBufferInfo_debug
+            };
+
             // and again as with the other two descriptor functions, put it into an array and then update it (or create it w/ the other ones) below.
             // we can combine the graphics and compute here because we've already differentiated them via dstSet -- so we just update them individually w/o influence from another.
-            std::array descriptorWrites { uboDescriptorWrite, samplerDescriptorWrite, computeBufferDescriptorWrite_ubo, computeBufferDescriptorWrite_CurrentFrame, computeBufferDescriptorWrite_PreviousFrame };
+            std::array descriptorWrites { uboDescriptorWrite, samplerDescriptorWrite, computeBufferDescriptorWrite_ubo, computeBufferDescriptorWrite_CurrentFrame, computeBufferDescriptorWrite_PreviousFrame, computeBufferDescriptorWrite_ddebug };
 
             // first param: describes what to update (so, we're updating the information above)
             // second param is to copy discriptors to each other, which we're not doing.
@@ -2544,7 +2622,7 @@ class HelloTriangleApplication
             vk::raii::DeviceMemory shaderStorageBufferTempMemory({});
 
             createGPUBuffer(bufferSize,
-                vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+                vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst, //vertex buffer is pointless right now because we don't have another pipeline (IT AINT DOING NOTHING IN VERTMAIN)
                 vk::MemoryPropertyFlagBits::eDeviceLocal,
                 shaderStorageBufferTemp,
                 shaderStorageBufferTempMemory
@@ -2556,6 +2634,23 @@ class HelloTriangleApplication
 
             // So now our vector of buffers (shaderStorageBuffers + shaderStorageBuffersMemory) contain the same data.
             // We're doing this because each buffer will have its own unique data at any given moment, so I suppose a central buffer wouldn't work (unlike uniform buffers).
+
+            // HEY! this buffer is SOLELY for debugging stuff from the SSBO: all it does is communicate from SSBO to a able-to-communicate-to-CPU buffer so we can print it out just to check it out!
+            vk::raii::Buffer debugStagingBuffer({});
+            vk::raii::DeviceMemory debugStagingBufferMemory({});
+            createGPUBuffer(
+                bufferSize,
+                vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
+                vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+                debugStagingBuffer,
+                debugStagingBufferMemory
+            );
+
+            debugShaderUniformBuffers.emplace_back( std::move( debugStagingBuffer ) ); // we need std::move here because we want an rvalue, and vk::raii::Buffer uniformBuffer is not copyable
+            debugShaderUniformBuffersMemory.emplace_back( std::move( debugStagingBufferMemory ) );
+            debugShaderUniformBuffersMapped.emplace_back( debugShaderUniformBuffersMemory[i].mapMemory( 0, bufferSize ) );
+
+
         }
     }
 

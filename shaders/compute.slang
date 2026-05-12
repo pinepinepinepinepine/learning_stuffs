@@ -19,6 +19,8 @@ struct ParticleSSBO {
 [[vk::binding(2, 0)]] StructuredBuffer<ParticleSSBO> particlesIn;
 [[vk::binding(1, 0)]] RWStructuredBuffer<ParticleSSBO> particlesOut;
 
+[[vk::binding(3, 0)]] RWStructuredBuffer<ParticleSSBO> debugParticleOut;
+
 // just to clarify, .slang code is to communicate to the GPU (not to the CPU, hence why we don't use... C++... and so we use another language)
 // So I presume computeUBO.deltaTime is updated from the CPU code (hence why we don't modify the .deltaTime here)
 [shader("compute")]
@@ -39,4 +41,7 @@ void compMain(uint3 threadId: SV_DispatchThreadID) // SV_DispatchThreadID is a b
     if ((particlesOut[index].particles.position.y <= -1.0) || (particlesOut[index].particles.position.y >= 1.0)) {
         particlesOut[index].particles.velocity.y = -particlesOut[index].particles.velocity.y;
     }
+
+    debugParticleOut[index].particles.position = particlesOut[index].particles.position;
+    debugParticleOut[index].particles.velocity.x = index;
 }
