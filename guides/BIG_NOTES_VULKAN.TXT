@@ -790,3 +790,102 @@ No Multisampling: https://docs.vulkan.org/tutorial/latest/_images/images/aliasin
 MSAA: https://docs.vulkan.org/tutorial/latest/_images/images/antialiasing.png
 
 For a comparison between Sample Shading on/off: https://docs.vulkan.org/tutorial/latest/_images/images/sample_shading.png
+
+=======
+
+We submit compute workloads to the GPU via a dispatch() function call.
+There are two important concepts: Work Groups, and Invocations.
+
+Work Groups are the actual work the GPU has to do, and the dimensions define how many times to run that job.
+Each Work Group contains a collection of Invocations, which execute the same compute shader.
+
+So, a work group consists of multiple invocations.
+
+The way they are defined/sized are via the call to dispatch().
+The number of dimensions for work groups (defined by computeCommandBuffers[frameIndex]→dispatch) and invocations depends (defined by the local sizes in the compute shader) on how input data is structured.
+    If you e.g., work on a one-dimensional array, like we do in this chapter, you only have to specify the x dimension for both.
+
+As an example, if we call dispatch() with a work group count of (64, 1, 1), it means we have a "square" that consists of 64 work groups on the X axis, 1 on Y and 1 on Z.
+So, we have 64 x 1 x 1 work groups to work through: 64 workgroups.
+Each work group then consists of X, Y, Z invocations (where the count is defined by a local compute shader size)
+So, if our local compute shader size is (32, 32, 1), it means we have a "square" of 32 X, 32 Y, and 1 Z for our invocations: 32 x 32 x 1 = 1024 individual invocations for every work group.
+
+The mental model is simple: a single work group consists of invocations (X, Y, Z), and the number of invocations is defined via a 3D axis -- it's just how it works.
+
+If we dispatch a work group count of [64, 1, 1] with a compute shader local size of [32, 32, 1], our compute shader will be invoked (64 x 1 x 1 ) x (32 x 32 x 1) = 65,536 times.
+
+The maximum count for work groups and invocations differ from implementation and is based upon the physical device.
+Within VkPhysicalDeviceLimits (via PhysicalDeviceProperties.limits), check the fields: maxComputeWorkGroupCount, maxComputeWorkGroupInvocations, and maxComputeWorkGroupSize (this last one specifies the limit of X/Y/Z for every work group/invocation)
+
+old code with a BINARY SEMAPHORE INSTEAD OF TIMELINE:
+
+        // the vk::SubmitInfo configures the queue submission and its synchronization through its members.
+        const vk::SubmitInfo graphicSubmitInfo {
+            .waitSemaphoreCount   = 1, // the number of semaphores we're waiting on before execution.
+            .pWaitSemaphores      = &*presentCompleteSemaphore[wait_frameIndex], // the actual Semaphores to wait upon before execution.
+            .pWaitDstStageMask    = &waitDestinationStageMask, // what stages of the pipeline where we need to wait for.
+                // We want to wait for writing colours to the image before we submit it, so we specify to wait during the color attachment stage which is responsible for colour.
+                // This means that the vertex shader and such can execute upon other images while this image is not available yet for submission.
+            .commandBufferCount   = 1, // the number of command buffers we want to execute (create).
+            .pCommandBuffers      = &*commandBuffers[wait_frameIndex], // the command buffer itself.
+            .signalSemaphoreCount = 1, // the number of Semaphores to signal whenever the command buffer(s) specified above finish executing
+            .pSignalSemaphores    = &*renderFinishedSemaphore[wait_frameIndex] // the semaphores themselves to signal.
+        };
+
+                const vk::PresentInfoKHR presentInfoKHR {
+            .waitSemaphoreCount = 1, // the number of semaphores to wait upon before presenting an image
+            .pWaitSemaphores    = &*renderFinishedSemaphore[wait_frameIndex], // the semaphores themselves to wait upon. (we want to wait for the command buffer to finish executing: we want to wait for the rendering/drawing of a photo to finish before presenting)
+            .swapchainCount     = 1, // the number of swap chains to present this image to
+            .pSwapchains        = &*swapChain, // the swap chains themselves to present this image to
+            .pImageIndices      = &imageIndex // the image's index assigned for each swap chain.
+        };
+
+
+        if (fenceResult != vk::Result::eSuccess)
+			throw std::runtime_error("failed to wait for fence!"); // Self explanatory: if for some reason waitForFences() didn't wait (it is expected for it to wait on the line above -- alternatively, we reached 64bit limit), we throw an exception because something went wrong.
+
+        // Note: We could also recreate the swap chain if an image acquired is eSuboptimalKHR, but we're just... not. whatever.
+        if ( result == vk::Result::eErrorOutOfDateKHR ) // If we return this, this means the swap chain is incompatible with the new surface and can no longer be used for rendering.
+            // if including #define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS, instead of throwing an exception (crashing the program if it isn't catched), eErrorOutOfDateKHR will be treated as a success code and actually execute as if it's a success
+            // Right now, since we never defined it, it'll never get to this point because it'll just crash the program.
+        {
+            std::cout << "HOW'D YOU GET HERE?\n";
+            recreateSwapChain(); // And yeah, won't ever get here, but if it does, we need to recreate the swap chain (duh) because the swap chain no longer works.
+            return; // note: we return here because we don't want to present the image (UNLIKE BELOW W/ SUBOPTIMAL)
+        }
+
+        if ( result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR ) // If the acquisition of an image failed, just stop the program, nothing special.
+        {
+            assert(result == vk::Result::eTimeout || result == vk::Result::eNotReady);
+            throw std::runtime_error("failed to acquire swap chain image!");
+        }
+
+TLDR: we annihilated the old binary semaphores used with timeline semaphores, see https://github.com/pinepinepinepinepine/learning_stuffs/commit/6bde55b0b5ffc809711a4091b3d565dee1dda544 and before for the previous drawFrame()
+
+Timeline semaphores are particularly useful in scenarios with multiple dependent operations, like our compute-then-graphics workflow, or when you need to synchronize between the host and device.
+
+
+====
+
+Summary of EVERYTHING:
+
+Okay, so, we've currently TWO uniform buffers, but the problem is we've only ONE vertex shader.
+The problem is that our vertex shader (and also fragment shader) is using the OLD (for our 3d model) uniform buffer.
+What does this mean? When we are submitting stuff through our current graphics pipeline, it will use the fragMain and vertMain.
+
+    auto shaderCode = readFile_SPIRVShaders("../shaders/slang.spv");
+    Then...
+    .pName = "fragMain" / "vertMain"
+
+Now: What the tutorial does is to make a new project altogether because this would (very likely) require a different pipeline for particles to go through.
+Why? because they use different logic altogether: one does projection matrices, and for our particles, we just wanna show em off.
+So right now, our program DOES technically work (because the GPU is calculating the particles positions via the Uniform buffer feeding info to the SSBO)
+But: we can't display it UNLESS we either
+    A. learn how to display them both, which sounds like a lot of work, as we'd very likely need to make a seperate graphics pipeline, and also figure out even how to make multiple objects displayed
+        Fortunately, it seems like there is a future tutorial regarding this!
+    or B. scrap the project basically and just make it elsewhere.
+
+For now: we are just gonna make it be in the background.
+
+Anyways, the idea with the compute shader is simple: all it does is run compute.slang's compMain on EVERY single particle on EVERY single drawFrame() call
+    and in turn, compMain makes the particle get a new position based on its velocity! so it's MOVING! woah!

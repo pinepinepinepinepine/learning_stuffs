@@ -1,4 +1,5 @@
 #include "vertex.cpp"
+#include "particle.cpp"
 #include <bitset>
 
 constexpr uint32_t WIDTH = 800;
@@ -31,12 +32,9 @@ constexpr bool enableValidationLayers = false;
 constexpr bool enableValidationLayers = true;
 #endif
 
-
-struct Particle
+struct ComputeUniformBufferObject
 {
-    glm::vec2 position;
-	glm::vec2 velocity;
-	glm::vec4 color;
+	float deltaTime = 1.0f;
 };
 
 class HelloTriangleApplication
@@ -127,6 +125,8 @@ class HelloTriangleApplication
     std::vector<vk::raii::CommandBuffer> commandBuffers;
         // commandBuffer(s) is now a vector due to us wanting to have multiple frames in flight: each frame needs its own command buffer.
 
+    std::vector<vk::raii::CommandBuffer> computeCommandBuffers;
+
     vk::raii::Buffer vertexBuffer = nullptr; // the buffer that'll be used to store/house vertex data (duh) -- this does not necessarily store anything, just references memory (in our case, vertexBufferMemory)
     vk::raii::DeviceMemory vertexBufferMemory = nullptr; // the handle to the allocated GPU memory reserved for the vertex buffer -- this will ACTUALLY contain the vertex data
 
@@ -183,8 +183,14 @@ class HelloTriangleApplication
         // Similarily with a vector of command buffers, every frame needs its own respective semaphore and fence to track it, hence we're making it a vector.
     uint32_t wait_frameIndex = 0; // To assign semaphores their respective frames to track.
 
+    vk::raii::Semaphore timelineSemaphore = nullptr;
+    uint64_t timelineValue = 0;
+
     // Multisampling! See big_notes for an explanation on multisampling -- MSAA = Multisampling Antialiasing
     vk::SampleCountFlagBits msaaSamples = vk::SampleCountFlagBits::e1;
+
+    double lastFrameTime = 0.0;
+    double lastTime = 0.0f;
 
     bool framebufferResized = false;
 
@@ -212,6 +218,7 @@ class HelloTriangleApplication
             // An important note is we're passing the function as a pointer to glfwSetFramebufferSizeCallback ( hence the lack of () ) -- GLFW calls framebufferResizeCallback() itself and passes window + width/height.
         glfwSetFramebufferSizeCallback( window, framebufferResizeCallback );
 
+        lastTime = glfwGetTime();
     }
 
     // the callback is static because GLFW can't call a member function with a this-> pointer (we're inside class HelloTriangleApplication, functions implicitly have this->)
@@ -275,6 +282,8 @@ class HelloTriangleApplication
 
         createCommandBuffers(); // see function for elaboration
 
+        createComputeCommandBuffers();
+
         createSyncObjects(); // see big_notes for what sync objects are
 
     }
@@ -286,6 +295,11 @@ class HelloTriangleApplication
         while (!glfwWindowShouldClose(window)) {
             glfwPollEvents();
             drawFrame();
+
+            double currentTime = glfwGetTime();
+			lastFrameTime      = (currentTime - lastTime) * 1000.0;
+			lastTime           = currentTime;
+
         }
 
         // Wait for the logicalDevice to finish operations before exiting the main loop.
@@ -297,52 +311,75 @@ class HelloTriangleApplication
 
         outputFile << get_current_time() << " | Beginning drawFrame" << std::endl;
 
-        // Waits for the logicalDevice's fence state to be signaled (true) before continuing past this line.
-            // The first parameter is an array of fences (we only have one so we just pass one fence object) that we want to wait upon
-            // The second parameter specifies if we want to wait for either: one of the fences to be signaled, or for all the fences to be signaled BEFORE returning, resulting in a wait within this line.
-            // Third parameter is a fail safe: if we  waited for the maximum integer number in nanoseconds with this wait, disable the timeout (because it means something went wrong) and continue
-        auto fenceResult = logicalDevice.waitForFences( *drawFence[wait_frameIndex], vk::True, UINT64_MAX );
-
-        if (fenceResult != vk::Result::eSuccess)
-			throw std::runtime_error("failed to wait for fence!"); // Self explanatory: if for some reason waitForFences() didn't wait (it is expected for it to wait on the line above -- alternatively, we reached 64bit limit), we throw an exception because something went wrong.
-
         // First param is the timeout: wait 64bit integer limit in nanoseconds before letting us pass
         // Second param is the semaphore: whenever we've acquired the next image (and finished executing acquireNextImage), signal the semaphore
         // Third param is the fence: we're not using a fence as a signal, so we use nullptr. Same logic as above.
         // the function itself returns two values: vk::Result, and the index of the vk::image within the swapChainImages array.
             // We then use that index to pick the vk::raii:FrameBuffer, and then use the command buffer on that framebuffer.
-        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, *presentCompleteSemaphore[wait_frameIndex], nullptr);
+        auto [result, imageIndex] = swapChain.acquireNextImage(UINT64_MAX, nullptr, *drawFence[wait_frameIndex]);
 
-        // Note: We could also recreate the swap chain if an image acquired is eSuboptimalKHR, but we're just... not. whatever.
-        if ( result == vk::Result::eErrorOutOfDateKHR ) // If we return this, this means the swap chain is incompatible with the new surface and can no longer be used for rendering.
-            // if including #define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS, instead of throwing an exception (crashing the program if it isn't catched), eErrorOutOfDateKHR will be treated as a success code and actually execute as if it's a success
-            // Right now, since we never defined it, it'll never get to this point because it'll just crash the program.
-        {
-            std::cout << "HOW'D YOU GET HERE?\n";
-            recreateSwapChain(); // And yeah, won't ever get here, but if it does, we need to recreate the swap chain (duh) because the swap chain no longer works.
-            return; // note: we return here because we don't want to present the image (UNLIKE BELOW W/ SUBOPTIMAL)
-        }
-
-        if ( result != vk::Result::eSuccess && result != vk::Result::eSuboptimalKHR ) // If the acquisition of an image failed, just stop the program, nothing special.
-        {
-            assert(result == vk::Result::eTimeout || result == vk::Result::eNotReady);
-            throw std::runtime_error("failed to acquire swap chain image!");
-        }
-
-        // this just updates the uniformBuffer's transformation matrices so that we can actually make the object spin.
-        // remember the vertex shader references the uniform buffer directly with the descriptor layout, so we don't need to change anything to drawFrame -- the vertex shader function in shader.slang handles its position
-            // GOD THANK FUCK THIS IS INTENDED TO BE PLACED BEFORE recordCommandBuffer() -- i could feel a FUCKING MIGRAINE trying to make sense of my IDIOCY. WHY THE FUCK WOULD I BE RECORDING A UPDATING THE BUFFER AFTER RECORDING IT? for the NEXT FRAME? ???
-        updateUniformBuffer(wait_frameIndex);
+        // Waits for the logicalDevice's fence state to be signaled (true) before continuing past this line.
+            // The first parameter is an array of fences (we only have one so we just pass one fence object) that we want to wait upon
+            // The second parameter specifies if we want to wait for either: one of the fences to be signaled, or for all the fences to be signaled BEFORE returning, resulting in a wait within this line.
+            // Third parameter is a fail safe: if we  waited for the maximum integer number in nanoseconds with this wait, disable the timeout (because it means something went wrong) and continue
+        auto fenceResult = logicalDevice.waitForFences( *drawFence[wait_frameIndex], vk::True, UINT64_MAX );
+        if (fenceResult != vk::Result::eSuccess)
+		{
+			throw std::runtime_error("failed to wait for fence!");
+		}
 
         // UPDATE: if result is eErrorOutOfDateKHR (it CANNOT OCCUR RIGHT NOW BECAUSE WE DIDN'T DEFINE IT AND SUBSEQUENTLY CATCH IT -- RIGHT NOW IT'LL CRASH THE PROGRAM), we MUST set this to unsignaled AFTER we've checked for eErrorOutOfDateKHR
         // because OTHERWISE the return (from above) causes the next drawFrame to wait till time-expiry due to drawFrame being unsignaled
         logicalDevice.resetFences( *drawFence[wait_frameIndex] ); // Signal the fence back to unsignaled so that the next iteration can run as expected (OTHERWISE, drawFence is set to signaled, causing waitForFences to never wait)
 
+
+        // We're making a timeline semaphore here. The values here makes it so we can go from 0 -> 1 -> 2 -> 3 (where each section of the timeline waits for the previous)
+        uint64_t computeWaitValue    = timelineValue;
+		uint64_t computeSignalValue  = ++timelineValue;
+
+        uint64_t graphicWaitValue    = timelineValue;
+		uint64_t graphicSignalValue  = ++timelineValue;
+
+        // this block here actually submits work for the compute pipeline.
+        updateComputeUniformBuffer( wait_frameIndex );
+
+        recordComputeCommandBuffer();
+
+        vk::PipelineStageFlags compute_waitDestinationStageMask( vk::PipelineStageFlagBits::eComputeShader );
+
+            // the semaphore timeline, instead of being signaled/unsignaled, a signal means it's +1'd from what it was inputted with
+            // therefore it just continually adds +1 -- computeSignalValue is always +1 over computeWaitValue after its completed.
+        vk::TimelineSemaphoreSubmitInfo computeTimelineInfo{
+            .waitSemaphoreValueCount   = 1,
+			.pWaitSemaphoreValues      = &computeWaitValue,
+			.signalSemaphoreValueCount = 1,
+			.pSignalSemaphoreValues    = &computeSignalValue
+        };
+
+        vk::SubmitInfo computeSubmitInfo{
+			.pNext                = &computeTimelineInfo,
+			.waitSemaphoreCount   = 1,
+			.pWaitSemaphores      = &*timelineSemaphore,
+			.pWaitDstStageMask    = &compute_waitDestinationStageMask,
+			.commandBufferCount   = 1,
+			.pCommandBuffers      = &*computeCommandBuffers[wait_frameIndex],
+			.signalSemaphoreCount = 1,
+			.pSignalSemaphores    = &*timelineSemaphore
+        };
+
+        graphicsQueue.submit(computeSubmitInfo, nullptr);
+
+        // time for the graphics queue
+        // this just updates the uniformBuffer's transformation matrices so that we can actually make the object spin.
+        // remember the vertex shader references the uniform buffer directly with the descriptor layout, so we don't need to change anything to drawFrame -- the vertex shader function in shader.slang handles its position
+            // GOD THANK FUCK THIS IS INTENDED TO BE PLACED BEFORE recordCommandBuffer() -- i could feel a FUCKING MIGRAINE trying to make sense of my IDIOCY. WHY THE FUCK WOULD I BE RECORDING A UPDATING THE BUFFER AFTER RECORDING IT? for the NEXT FRAME? ???
+        updateUniformBuffer(wait_frameIndex);
+
         recordCommandBuffer( imageIndex );
         // Notice: we rerecord the command buffer each time, different each time depending on the image
             // Essentially, we record the commands we want to occur onto that image, hence why we re-record it each time -- it's image specific!
 
-        graphicsQueue.waitIdle();
+        //graphicsQueue.waitIdle();
         // VULKAN NOTE: for simplicity, wait for the queue to be idle before starting the frame
 		    // In the next chapter you see how to use multiple frames in flight and fences to sync
         // ME: removing this causes a validation layer error.
@@ -350,31 +387,65 @@ class HelloTriangleApplication
 
         vk::PipelineStageFlags waitDestinationStageMask( vk::PipelineStageFlagBits::eColorAttachmentOutput );
 
+        vk::TimelineSemaphoreSubmitInfo graphicsTimelineInfo{
+			    .waitSemaphoreValueCount   = 1,
+			    .pWaitSemaphoreValues      = &graphicWaitValue,
+			    .signalSemaphoreValueCount = 1,
+			    .pSignalSemaphoreValues    = &graphicSignalValue
+            };
+
         // the vk::SubmitInfo configures the queue submission and its synchronization through its members.
-        const vk::SubmitInfo submitInfo {
+        const vk::SubmitInfo graphicSubmitInfo {
+            .pNext                = &graphicsTimelineInfo,
             .waitSemaphoreCount   = 1, // the number of semaphores we're waiting on before execution.
-            .pWaitSemaphores      = &*presentCompleteSemaphore[wait_frameIndex], // the actual Semaphores to wait upon before execution.
+            .pWaitSemaphores      = &*timelineSemaphore, // the actual Semaphores to wait upon before execution.
             .pWaitDstStageMask    = &waitDestinationStageMask, // what stages of the pipeline where we need to wait for.
-                // We want to wait for writing colours to the image before we submit it, so we specify to to wait during the color attachment stage which is responsible for colour.
+                // We want to wait for writing colours to the image before we submit it, so we specify to wait during the color attachment stage which is responsible for colour.
                 // This means that the vertex shader and such can execute upon other images while this image is not available yet for submission.
             .commandBufferCount   = 1, // the number of command buffers we want to execute (create).
             .pCommandBuffers      = &*commandBuffers[wait_frameIndex], // the command buffer itself.
             .signalSemaphoreCount = 1, // the number of Semaphores to signal whenever the command buffer(s) specified above finish executing
-            .pSignalSemaphores    = &*renderFinishedSemaphore[wait_frameIndex] // the semaphores themselves to signal.
+            .pSignalSemaphores    = &*timelineSemaphore // the semaphores themselves to signal.
         };
+
+        // notice with the addition of the timeline semaphores, we're enforcing this compute -> graphic pipeline order with the GPU
 
         // we can now submit the command buffer to the graphics queue (submitInfo contains the command buffer, which in turn contains the image we just recorded onto it, so thats how we ultimately display images!)
         // First parameter takes an array of vk::SubmitInfo structs (an array because it's more efficient for much larger workloads)
         // Second parameter is the fence that'll be signaled whenever the command buffer finishes execution. (Which will be waited upon for the next frame -- next call to drawFrame()!)
-        graphicsQueue.submit( submitInfo, *drawFence[wait_frameIndex] ); // Fence gets sigaled whenever GPU fully finishes w/ graphics queue, so next call to drawFrame isn't blocked.
+        graphicsQueue.submit( graphicSubmitInfo, nullptr ); // Fence gets sigaled whenever GPU fully finishes w/ graphics queue, so next call to drawFrame isn't blocked. NOT ANYMORE!
+
+        // OKAY! HEADS UP, FOR THE COMPUTE QUEUE, WE'LL HAVE TO FIGURE THIS OUT. we do not have to yet seperate the graphics and compute queue because the "graphicsQueue" queue also supports compute queue
+        // and also if we did seperate them, we'd have to change the command pool the computeCommandBuffers() are allocated from.
 
 
+        vk::SemaphoreWaitInfo waitInfo{
+			.semaphoreCount = 1,
+			.pSemaphores    = &*timelineSemaphore,
+			.pValues        = &graphicSignalValue
+        };
+
+        auto resultSemaphore = logicalDevice.waitSemaphores( waitInfo, UINT64_MAX );
+        if (resultSemaphore != vk::Result::eSuccess)
+		{
+			throw std::runtime_error("failed to wait for semaphore!");
+		}
+
+        // update: DUE TO THE WAIT WAIT TO THE SEMAPHORE ABOVE, WE NO LONGER NEED TO TRACK IT WITH PRESENTINFOKHR (HENCE SEMAPHORE COUNT 0 + NULLPTR)
+        // The way this works is VERY simple:
+        // the timeline semaphore is quite literally forcing this timeline to occur: compute pipeline -> graphics pipeline -> wait for presentation (to be direct, waiting for graphics pipeline to finish)
+        // the way it works is just waiting for the semaphore to be +1'd over the previous to indicate it's finished.
+        // again, notice how for presentInfoKHR we do not wait for a semaphore anymore and just IMMEDIATELY send the image to present.
+        // this is because of waitInfo directly above where it's waiting for graphics to complete.
+        // if HYPOTHETICALLY we do NOT wait for the waitSemaphore call, then some of our images will be messy and show these weird ass squares around the vertices (just some artifact of presenting when not ready)
 
         // the FINAL step is to submit the image back to the swap chain to have it eventually show up on the screen!
         // The presentation is configured through vk::PresentInfoKHR.
+        // TIMELINE SEMAPHORES DONT WORK WITH VKPRESENTINFOKHR FOR SOME REASON
+        // if we really gaf, make a binary semaphore and tie it with this again.
         const vk::PresentInfoKHR presentInfoKHR {
-            .waitSemaphoreCount = 1, // the number of semaphores to wait upon before presenting an image
-            .pWaitSemaphores    = &*renderFinishedSemaphore[wait_frameIndex], // the semaphores themselves to wait upon. (we want to wait for the command buffer to finish executing: we want to wait for the rendering/drawing of a photo to finish before presenting)
+            .waitSemaphoreCount = 0, // the number of semaphores to wait upon before presenting an image (DUE TO US USING TIMELINE SEMAPHORES, WE DON'T NEED THIS ANYMORE)
+            .pWaitSemaphores    = nullptr, // the semaphores themselves to wait upon. (we want to wait for the command buffer to finish executing: we want to wait for the rendering/drawing of a photo to finish before presenting)
             .swapchainCount     = 1, // the number of swap chains to present this image to
             .pSwapchains        = &*swapChain, // the swap chains themselves to present this image to
             .pImageIndices      = &imageIndex // the image's index assigned for each swap chain.
@@ -574,13 +645,14 @@ class HelloTriangleApplication
 
         // Check if our device can support whatever features -- WE ARE NOT ENABLING THEM HERE, JUST QUERYING IF THEY'RE SUPPORTED -- WE ENABLE THEM IN createLogicalDevice()
         // We need to grab ahold of this physical device's vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>(), so we use a template function
-        auto features = physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>();
+        auto features = physicalDevice.template getFeatures2<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT,vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR>();
         // Then we check if they actually exist for this physical device through features (these act as a sort of bool here -- if they're false, our device doesn't support it)
         bool supportsRequiredFeatures = features.template get<vk::PhysicalDeviceFeatures2>().features.samplerAnisotropy && // anistropic filtering is an optional device feature: most modern gpus have it, but we're just being safe by checking if it's compatible w/ our device
                                         features.template get<vk::PhysicalDeviceVulkan11Features>().shaderDrawParameters &&
                                         features.template get<vk::PhysicalDeviceVulkan13Features>().dynamicRendering &&
                                         features.template get<vk::PhysicalDeviceVulkan13Features>().synchronization2 &&
-                                        features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState;
+                                        features.template get<vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT>().extendedDynamicState &&
+                                        features.template get<vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR>().timelineSemaphore;
         if ( supportsRequiredFeatures )
             std::cout << deviceProperties.deviceName << " supports our required features!\n";
 
@@ -616,6 +688,28 @@ class HelloTriangleApplication
 
         // see the function, but it's really straight forward, just for the physicalDevice we've selected, we get its maximum supported sample count per pixel, and then set that value to msaaSamples.
         msaaSamples = getMaxUsableSampleCount();
+
+        // just seeing what our compute shader work load limits are.
+
+        vk::PhysicalDeviceLimits physicalDeviceLimits = physicalDevice.getProperties().limits;
+
+        // the number of work groups allowed is the first field, y and z are limits for those specific fields.
+        std::cout << "Max Work Group Count: ("
+        << physicalDeviceLimits.maxComputeWorkGroupCount[0] << "x, " // It's enormous because most of the time stuff is 1D, so I suppose it's optimized primarily for this, so we can have 4294967295 work groups.
+        << physicalDeviceLimits.maxComputeWorkGroupCount[1] << "y, "
+        << physicalDeviceLimits.maxComputeWorkGroupCount[2] << "z)"
+        << std::endl;
+
+        std::cout << "Max Invocation Count: "<< physicalDeviceLimits.maxComputeWorkGroupInvocations << std::endl; // the amount of invocations allowed per work group (1024)
+
+        // it's a little confusing, but this is the individual number allowed of invocations within a single work group, it cannot exceed 1024, but remember the maximum number of invocations is 1024
+        // no matter what the maximum has to be 1024 invocations per work group, you can modify the dimensions however you like so long it doesn't exceed maxComputeWorkGroupInvocations
+            // this is closely related to invocations.
+        std::cout << "Max Work Group Size: ("
+        << physicalDeviceLimits.maxComputeWorkGroupSize[0] << "x, "
+        << physicalDeviceLimits.maxComputeWorkGroupSize[1] << "y, "
+        << physicalDeviceLimits.maxComputeWorkGroupSize[2] << "z)"
+        << std::endl;
 
         std::cout << "using " << physicalDevice.getProperties().deviceName << " as our physical device!\n";
 	}
@@ -663,13 +757,14 @@ class HelloTriangleApplication
         // in order to enable any feature, Vulkan uses a concept of "structure chaining", where each feature struct (the <> feature structs specified below)
         // has a pNext field that can point to another unrelated feature struct, which is a "chain of feature requests" -- the vulkan C++ API provides a helper template vk::StructureChain to make this easier.
         // First step: we create a vk::StructureChain with 3 different feature structs, and for each different struct, we provide an initializer, assign them below with {}, seperating w/ comma
-        vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT> featureChain = {
+        vk::StructureChain<vk::PhysicalDeviceFeatures2, vk::PhysicalDeviceVulkan11Features, vk::PhysicalDeviceVulkan13Features, vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT, vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR> featureChain = {
             { .features = { .sampleRateShading = true, .samplerAnisotropy = true } },
                 // And yay! with multisampling, we enabled sampleShading within the graphics pipeline, so we do this to allow it to be vk::True!
                 // vk::PhysicalDeviceFeatures2: anistropic filtering is an optional device feature, so we need to enable it ourselves (otherwise validation layer msg).
             { .shaderDrawParameters = true},   // vk::PhysicalDeviceVulkan11Features - UNMENTIONED IN DOCS: needed for shader creation otherwise warning -- we're just enabling it (we query'd support in isDeviceSuitable)
             { .synchronization2 = true, .dynamicRendering = true},      // vk::PhysicalDeviceVulkan13Features - enable the 'dynamic rendering' feature from Vulkan 1.3
-            { .extendedDynamicState = true }   // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT - enable the 'extended dynamic state' feature from the extension struct
+            { .extendedDynamicState = true },   // vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT - enable the 'extended dynamic state' feature from the extension struct
+            { .timelineSemaphore = true }       // vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR
         }; // vk::StructureChain automatically connects these structs together by setting up the pNext pointer between them, so now we have one object containing all 3 structs and their requested extensions (even if they're unrelated to one another)!
         // As a result of them being chained together, when actually creating the logical device later, we just pass a pointer to the first structure in this chain, which will then trickle down to allow Vulkan seeing the other 2.
             // An added thing: the function expects PhysicalDeviceFeatures (base) to be FIRST in the chain, but the order of the other structs dont matter
@@ -1127,7 +1222,7 @@ class HelloTriangleApplication
             {
                 .buffer = shaderUniformBuffers[i],
                 .offset = 0,
-                .range = sizeof(Particle) * PARTICLE_COUNT
+                .range = sizeof(ComputeUniformBufferObject)
             };
 
             vk::DescriptorBufferInfo computeBufferInfo_CurrentFrame
@@ -1202,7 +1297,7 @@ class HelloTriangleApplication
 
             // and again as with the other two descriptor functions, put it into an array and then update it (or create it w/ the other ones) below.
             // we can combine the graphics and compute here because we've already differentiated them via dstSet -- so we just update them individually w/o influence from another.
-            std::array descriptorWrites { uboDescriptorWrite, samplerDescriptorWrite, computeBufferDescriptorWrite_CurrentFrame, computeBufferDescriptorWrite_PreviousFrame };
+            std::array descriptorWrites { uboDescriptorWrite, samplerDescriptorWrite, computeBufferDescriptorWrite_ubo, computeBufferDescriptorWrite_CurrentFrame, computeBufferDescriptorWrite_PreviousFrame };
 
             // first param: describes what to update (so, we're updating the information above)
             // second param is to copy discriptors to each other, which we're not doing.
@@ -1442,7 +1537,7 @@ class HelloTriangleApplication
         computePipelineLayout = vk::raii::PipelineLayout( logicalDevice, computePipelineLayoutInfo );
 
         // this is the same logic as the graphics pipeline, the only difference is that the compute pipeline only has one stage: the compute shader stage.
-        auto shaderCode = readFile_SPIRVShaders("../shaders/slang.spv");
+        auto shaderCode = readFile_SPIRVShaders("../shaders/compute.spv");
         vk::raii::ShaderModule shaderModule = createShaderModule( shaderCode );
 
         vk::PipelineShaderStageCreateInfo computeShader_StageInfo
@@ -1543,6 +1638,18 @@ class HelloTriangleApplication
 
         // As with everything, We feed it the logicalDevice to specify we're utilizing this GPU, then pass the actual creation information.
         commandBuffers = vk::raii::CommandBuffers( logicalDevice, commandBuffer_allocationInfo );
+    }
+
+    // probably a great idea to make a function to create a argument'd commandBuffer
+    void createComputeCommandBuffers()
+    {
+        vk::CommandBufferAllocateInfo commandBuffer_allocationInfo {
+            .commandPool = commandPool, // we're re-using the same command pool because the queue associated with it supports compute and graphics, so it'll do, but yeah im also lazy to make seperate.
+            .level = vk::CommandBufferLevel::ePrimary,
+            .commandBufferCount = MAX_FRAMES_IN_FLIGHT
+        };
+
+        computeCommandBuffers = vk::raii::CommandBuffers( logicalDevice, commandBuffer_allocationInfo );
     }
 
     // recordCommandBuffer() will write (known as record) the commands that we want to contain inside a command buffer.
@@ -1717,6 +1824,42 @@ class HelloTriangleApplication
         );
 
         commandBuffers[wait_frameIndex].end(); // we've finished recording the command buffer: signal its end.
+    }
+
+    void recordComputeCommandBuffer()
+    { // wait_frameIndex
+        computeCommandBuffers[wait_frameIndex].begin({});
+
+        // notice how we're specifically binding to the compute pipeline (unlike w/ recordCommandBuffer binding to the graphics pipeline)
+        computeCommandBuffers[wait_frameIndex].bindPipeline( vk::PipelineBindPoint::eCompute, *computePipeline );
+
+        // and again we're binding to our specific descriptor set that we made specifically for the compute pipeline.
+        computeCommandBuffers[wait_frameIndex].bindDescriptorSets(
+            vk::PipelineBindPoint::eCompute,
+            computePipelineLayout,
+            0,
+            *computeDescriptorSets[wait_frameIndex],
+            nullptr
+        );
+
+        // the real only new thing here is dispatch, which is how we send our commands to the compute pipeline.
+        // 256x, 1y, and 1z magic numbers comes from compute.slang's thread (invocation) count
+            // we're diving it up by particle count because that's how many work groups we need.
+            // each work group contains 256 invocations, and we have a particle count of 8192 (so our maximum)
+            // hence 32 work groups (8192 / 256), and each work group has 256 invocations: 256 (invocations) x 32 (work groups) = 8192 total particles
+            // as a heads up though, for our particle count, we have to asynchronise it (make it a factor) of our threads so we don't have any icky decimal points for work groups.
+                // Getting the two numbers right usually takes some tinkering and profiling, depending on your workload and the hardware you’re running on.
+                // if hypothetically we had particle count 4096, then our work group count would be 16 because 4096 / 256 = 16.
+        // If your particle size is dynamic and can’t always be divided by e.g., 256,
+        // you can always use gl_GlobalInvocationID at the start of your compute shader and return from it if the global invocation index is greater than the number of your particles.
+        computeCommandBuffers[wait_frameIndex].dispatch( PARTICLE_COUNT / 256, 1, 1 );
+        // within the recordCommandBuffer, this dispatch() call behaves PARTIALLY equivalent to drawIndexed()/draw()
+        // the only major difference is that draw() works for the graphics pipeline, whereas dispatch is for the compute pipeline.
+            // they're like 2 sides of the same coin, all they do is issue a command through the pipeline: dispatch for compute pipeline, draw for graphics pipeline.
+        // however, just a heads up, the compute pipeline has WAY less states/stages compared to the graphics pipeline, hence why we don't need to start a render pass or set a viewport like we did within recordCommandBuffer()
+            // i should probably change recordCommandBuffer() to recordGraphicCommandBuffer(), idk, idc rn.
+
+        computeCommandBuffers[wait_frameIndex].end();
     }
 
     // function to find and pick a depth format that is supported by our graphics card.
@@ -2374,7 +2517,7 @@ class HelloTriangleApplication
             particle.color = glm::vec4(rndDist(rndEngine), rndDist(rndEngine), rndDist(rndEngine), 1.0f);
         }
 
-            vk::DeviceSize bufferSize = sizeof(Particle) * PARTICLE_COUNT;
+        vk::DeviceSize bufferSize = sizeof(Particle) * PARTICLE_COUNT;
 
         // Create a staging buffer used to upload data to the gpu
         // these are LOCAL variables because the CPU will NOT have access to this buffer.
@@ -2383,7 +2526,8 @@ class HelloTriangleApplication
         vk::raii::DeviceMemory stagingBufferMemory({});
         createGPUBuffer(
             bufferSize,
-            vk::BufferUsageFlagBits::eTransferSrc, vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            vk::BufferUsageFlagBits::eTransferSrc,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
             stagingBuffer,
             stagingBufferMemory
         );
@@ -2451,7 +2595,7 @@ class HelloTriangleApplication
             // For an example, mapMemory(): for the vertex buffer, we call it and then close it -- this only occurs once to feed the data to the vertex buffer, so we don't need persistent mapping for that scenario.
             // However, the uniform buffer will be updated EVERY call to drawFrame() with new data, so persistent mapping is WAY better because we don't have to map and unmap the region of memory, which, again, isn't free.
 
-            vk::DeviceSize shaderUniformBufferSize = sizeof( UniformBufferObject );
+            vk::DeviceSize shaderUniformBufferSize = sizeof( ComputeUniformBufferObject );
             vk::raii::Buffer shaderUniformBuffer({});
             vk::raii::DeviceMemory shaderUniformBufferMemory({});
 
@@ -2518,6 +2662,14 @@ class HelloTriangleApplication
 
         // A more efficient way to pass a small buffer of data to shaders is to use 'push constants'. We may look at these in a future chapter, but for now:
         memcpy( uniformBuffersMapped[currentImage], &ubo, sizeof(ubo) );
+    }
+
+    void updateComputeUniformBuffer( uint32_t currentImage )
+    {
+        ComputeUniformBufferObject ubo{};
+		ubo.deltaTime = static_cast<float>(lastFrameTime) * 2.0f;
+
+		memcpy( shaderUniformBuffersMapped[currentImage], &ubo, sizeof(ubo) );
     }
 
     // This function is pretty much an exact copy of createVertexBuffer (but for indices) and so works in much the same way -- read createVertexBuffer() for an explanation.
@@ -2819,11 +2971,22 @@ class HelloTriangleApplication
             // Future versions (FUTURE.. JUST IN PLANNING) of Vulkan may add .flags (like w/ fences) and .pNext for vk::SemaphoreCreateInfo, similarily to other structures.
 
         // For every frame in flight, we need a semaphore to track/signal the presentation of it.
+
+        drawFence.clear();
+
         for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
         {
             presentCompleteSemaphore.emplace_back( logicalDevice, vk::SemaphoreCreateInfo() ); // semaphore is unsignaled on creation because, unlike fence, we don't need it to be signaled (gpu handles this garbage)
-            drawFence.emplace_back( logicalDevice, vk::FenceCreateInfo( { .flags = vk::FenceCreateFlagBits::eSignaled } ) ); // .FLAGS IS KINDA NEEDED HERE BECAUSE OTHERWISE THE FENCE IS UNSIGNALED -- THIS ENSURES FOR THE FIRST TIME WE ENTER DRAWFRAME(), IT'S SIGNALED (SO IT DOESNT WAIT ON THE TIMELIMIT EXPIRY)
+            vk::FenceCreateInfo fenceInfo{};
+            drawFence.emplace_back( logicalDevice, fenceInfo );
+            // NOT ANYMORE:
+            // .FLAGS IS KINDA NEEDED HERE BECAUSE OTHERWISE THE FENCE IS UNSIGNALED -- THIS ENSURES FOR THE FIRST TIME WE ENTER DRAWFRAME(), IT'S SIGNALED (SO IT DOESNT WAIT ON THE TIMELIMIT EXPIRY)
         }
+
+        vk::SemaphoreTypeCreateInfo semaphoreType{.semaphoreType = vk::SemaphoreType::eTimeline, .initialValue = 0};
+		timelineSemaphore = vk::raii::Semaphore( logicalDevice, {.pNext = &semaphoreType} );
+            // pNext is required for a "timeline semaphore"
+        timelineValue = 0;
 
         // We make a semaphore for every image within the swap chain to signal whether that image has finished rendering.
             // "Whenever renderFinished becomes signaled, send the rendered image to the GPU for presentation, and presentation waits on a separate presentComplete semaphore to actually display"

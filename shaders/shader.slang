@@ -8,7 +8,7 @@ struct UniformBuffer {
     float4x4 view;
     float4x4 proj;
 };
-ConstantBuffer<UniformBuffer> ubo;
+[[vk::binding(0, 0)]] ConstantBuffer<UniformBuffer> ubo;
 // the mental model here is that: at this byte offset, read the member's size. the problem is "at this byte offset".
 // hypothetically, if the next member to read is of size 16, it's offset (beginning byte) is expected to be at byte 16.
 // HOWEVER, due to float2 foo being 8 bytes (stored at 0-8 bytes), the CPU stores the model member at offset 8, not 16.
@@ -68,7 +68,7 @@ VertexOutput vertMain( VertexInput input )
     return output;
 }
 
-Sampler2D texture; // A sampler represents a combined image sampler descriptor in Slang -- there's also an equivalent sampler1D and sampler3D for other types of images.
+[[vk::binding(1, 0)]] Sampler2D texture; // A sampler represents a combined image sampler descriptor in Slang -- there's also an equivalent sampler1D and sampler3D for other types of images.
 // This function is called upon for EVERY fragment (similarly to how vertMain is called upon for EVERY vertex)
 [shader("fragment")] // Identifies the function as a Fragment Shader; if left out, the GPU won't know what function to call upon to act as the Fragment Shader.
 float4 fragMain(VertexOutput inVert) : SV_Target // SV_Target specifies the index of the specific framebuffer we're outputting/displaying to.
@@ -81,24 +81,4 @@ float4 fragMain(VertexOutput inVert) : SV_Target // SV_Target specifies the inde
 
     // texture colours are manipulated using the vertex colors
     //return float4( inVert.color * texture.Sample(inVert.fragmentTextureCoords).rgb, 1.0f);
-}
-
-// ill look into what the hell im looking at later, i JUST wanna compile this.
-[shader("compute")]
-[numthreads(256, 1, 1)]
-void compMain(uint3 threadId: SV_DispatchThreadID)
-{
-    return;
-    // uint index = threadId.x;
-
-    // particlesOut[index].particles.position = particlesIn[index].particles.position + particlesIn[index].particles.velocity.xy * ubo.deltaTime;
-    // particlesOut[index].particles.velocity = particlesIn[index].particles.velocity;
-
-    // // Flip movement at window border
-    // if ((particlesOut[index].particles.position.x <= -1.0) || (particlesOut[index].particles.position.x >= 1.0)) {
-    //     particlesOut[index].particles.velocity.x = -particlesOut[index].particles.velocity.x;
-    // }
-    // if ((particlesOut[index].particles.position.y <= -1.0) || (particlesOut[index].particles.position.y >= 1.0)) {
-    //     particlesOut[index].particles.velocity.y = -particlesOut[index].particles.velocity.y;
-    // }
 }
