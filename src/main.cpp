@@ -1,5 +1,6 @@
 #include "vertex.cpp"
 #include "particle.cpp"
+#include "object.cpp"
 #include <bitset>
 
 constexpr uint32_t WIDTH = 800;
@@ -7,6 +8,16 @@ constexpr uint32_t HEIGHT = 600;
 
 // number of particles to create.
 constexpr uint32_t PARTICLE_COUNT = 8192;
+
+// number of max objects to render
+constexpr int MAX_OBJECTS = 3;
+
+struct modelUniformBufferObject
+{
+	alignas(16) glm::mat4 model;
+	alignas(16) glm::mat4 view;
+	alignas(16) glm::mat4 proj;
+};
 
 // path to the model's texture and path (duh)
 const std::string MODEL_PATH = "../models/spin.obj";
@@ -102,6 +113,8 @@ class HelloTriangleApplication
     // A 'descriptor set layout' specifies the types of resources that'll be accessed by the shaders (in the pipeline)
     vk::raii::DescriptorSetLayout descriptorSetLayout = nullptr;
 
+    vk::raii::DescriptorSetLayout modelDescriptorSetLayout = nullptr;
+
     // Descriptor sets can't be directly created. Similarily w/ Command Buffers, they need to be allocated from a pool.
     vk::raii::DescriptorPool descriptorPool = nullptr;
 
@@ -196,12 +209,13 @@ class HelloTriangleApplication
     // Multisampling! See big_notes for an explanation on multisampling -- MSAA = Multisampling Antialiasing
     vk::SampleCountFlagBits msaaSamples = vk::SampleCountFlagBits::e1;
 
+    // Array of game objects to render
+    std::array<ModelObject, MAX_OBJECTS> modelObjects;
+
     double lastFrameTime = 0.0;
     double lastTime = 0.0f;
-
     unsigned int frame_count = 0;
     double frames_per_second;
-
     double lastTime_FPS = 0.0f;
 
 
@@ -264,6 +278,8 @@ class HelloTriangleApplication
 
         createDescriptorSetLayout(); // for an explanation of what this is, see BIG_NOTES. we need to create this before the pipeline as the pipeline'll require it.
 
+        createObjectDescriptorSetLayout();
+
         createGraphicsPipeline(); // For an explanation of the graphics pipeline, see BIG_NOTES
 
         createComputePipeline(); // compute pipeline is a seperate pipeline to the graphics pipeline. it's used to have the gpu itself run general, cpu-like commands for computation -- you can also modify images with the compute shader.
@@ -280,6 +296,11 @@ class HelloTriangleApplication
 
         loadModel();
 
+        setupModelObjects();
+
+
+        createModelUniformBuffer();
+
 
         createVertexBuffer(); // see function for elaboration
 
@@ -292,6 +313,8 @@ class HelloTriangleApplication
         createDescriptorPool();
 
         createDescriptorSets();
+
+        createObjectDescriptorSets();
 
         createCommandBuffers(); // see function for elaboration
 
@@ -387,15 +410,14 @@ class HelloTriangleApplication
 
         // We're making a timeline semaphore here. The values here makes it so we can go from 0 -> 1 -> 2 -> 3 (where each section of the timeline waits for the previous)
         // if we're testing w/o compute, remove compute wait values cause they affect timelineValue.
-        uint64_t computeWaitValue    = timelineValue;
-		uint64_t computeSignalValue  = ++timelineValue;
-
         uint64_t graphicWaitValue    = timelineValue;
 		uint64_t graphicSignalValue  = ++timelineValue;
 
         // this block here actually submits work for the compute pipeline -- we're putting it on a custom toggle.
-        if ( true )
+        if ( false )
         {
+            uint64_t computeWaitValue    = timelineValue;
+		    uint64_t computeSignalValue  = ++timelineValue;
             updateComputeUniformBuffer( wait_frameIndex );
 
             recordComputeCommandBuffer();
@@ -429,11 +451,14 @@ class HelloTriangleApplication
         // this just updates the uniformBuffer's transformation matrices so that we can actually make the object spin.
         // remember the vertex shader references the uniform buffer directly with the descriptor layout, so we don't need to change anything to drawFrame -- the vertex shader function in shader.slang handles its position
             // GOD THANK FUCK THIS IS INTENDED TO BE PLACED BEFORE recordCommandBuffer() -- i could feel a FUCKING MIGRAINE trying to make sense of my IDIOCY. WHY THE FUCK WOULD I BE RECORDING A UPDATING THE BUFFER AFTER RECORDING IT? for the NEXT FRAME? ???
-        updateUniformBuffer(wait_frameIndex);
+        //updateUniformBuffer(wait_frameIndex);
+        updateModelUniformBuffer( wait_frameIndex );
 
-        recordCommandBuffer( imageIndex );
+        //recordCommandBuffer( imageIndex );
         // Notice: we rerecord the command buffer each time, different each time depending on the image
             // Essentially, we record the commands we want to occur onto that image, hence why we re-record it each time -- it's image specific!
+
+        recordModelCommandBuffer( imageIndex );
 
         //graphicsQueue.waitIdle();
         // VULKAN NOTE: for simplicity, wait for the queue to be idle before starting the frame
@@ -1220,14 +1245,21 @@ class HelloTriangleApplication
         vk::DescriptorPoolSize computeUBOPoolSize( vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT );
         vk::DescriptorPoolSize computePoolSize( vk::DescriptorType::eStorageBuffer, MAX_FRAMES_IN_FLIGHT * 3 );
 
-        std::array total_poolSize { uboPoolSize, samplerPoolSize, computeUBOPoolSize, computePoolSize };
+        // and the descriptors for the model objects
+
+        vk::DescriptorPoolSize modelUBOPoolSize( vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT * MAX_OBJECTS );
+        vk::DescriptorPoolSize modelSamplerPoolSize( vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT * MAX_OBJECTS );
+
+        std::array total_poolSize { uboPoolSize, samplerPoolSize, computeUBOPoolSize, computePoolSize, modelUBOPoolSize, modelSamplerPoolSize };
         // whenever we call vkAllocateDescriptorSets to allocate the descriptor sets, sometimes we might run out of memory if we fuck up, but sometimes the driver'll automatically fix it for us
         // however sometimes it doesn't do this, and validation layers will NOT catch this and print it out... so just be mindful as it can work on some machines, but not on others -- just don't fuck up to begin with
         // some new vulkan update also eliminates the need to specify .descriptorCount for creation of the descriptor pool, but it's best practice to do so, so just include it.
 
+        // we might not need to increase the max sets as we could just tie the model descriptors with the previous
+        // +2 because of the compute and normal graphics, every object gets its own descriptor set
         vk::DescriptorPoolCreateInfo poolInfo {
             .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, // Flags to give to the pool: eFreeDescriptorSet means we can "free" (delete) descriptors individually instead of having to free the whole pool. We don't use this, so you can also just leave this at 0, but whatever.
-            .maxSets = MAX_FRAMES_IN_FLIGHT * 2, // the maximum number of descriptor >SETS< that can be allocated from this pool (we do NOT need to change this even w/ the inclusion of samplerPoolSize because each SET contains BOTH ubo and sampler descriptors -- we don't need 6, 3 is fine because for every descriptor set there's a UBO + sampler)
+            .maxSets = MAX_FRAMES_IN_FLIGHT * (MAX_OBJECTS + 2), // the maximum number of descriptor >SETS< that can be allocated from this pool (we do NOT need to change this even w/ the inclusion of samplerPoolSize because each SET contains BOTH ubo and sampler descriptors -- we don't need 6, 3 is fine because for every descriptor set there's a UBO + sampler)
                 // with the addition of compute layout, we now * 2 it because we've 2 descriptor sets... hence *2... duh.
             .poolSizeCount = static_cast<uint32_t>( total_poolSize.size() ), // the number of pool sizes we're using (.poolSizeCount is a uint32_t, .size() returns size_t)
             .pPoolSizes = total_poolSize.data() // the pool size themselves
@@ -1384,6 +1416,151 @@ class HelloTriangleApplication
         }
     }
 
+    void createObjectDescriptorSetLayout()
+    {
+        vk::DescriptorSetLayoutBinding modelUBOBinding
+        {
+            0,
+            vk::DescriptorType::eUniformBuffer,
+            1,
+            vk::ShaderStageFlagBits::eVertex,
+            nullptr
+        };
+
+        vk::DescriptorSetLayoutBinding modelSamplerBinding
+        {
+            1,
+            vk::DescriptorType::eCombinedImageSampler,
+            1,
+            vk::ShaderStageFlagBits::eFragment,
+            nullptr
+        };
+
+        std::array modelDescriptorBindings { modelUBOBinding, modelSamplerBinding };
+
+        vk::DescriptorSetLayoutCreateInfo modelSetLayoutCreateInfo
+        {
+            .bindingCount = static_cast<uint32_t>( modelDescriptorBindings.size() ),
+            .pBindings = modelDescriptorBindings.data()
+        };
+
+        modelDescriptorSetLayout = vk::raii::DescriptorSetLayout( logicalDevice, modelSetLayoutCreateInfo );
+    }
+
+    void createObjectDescriptorSets()
+    {
+        for ( auto& modelObject: modelObjects )
+        {
+            // it's a vector. make sure it's clear'd before creating/recreating it.
+            modelObject.descriptorSets.clear();
+
+            std::vector<vk::DescriptorSetLayout> model_layouts( MAX_FRAMES_IN_FLIGHT, *modelDescriptorSetLayout );
+
+            vk::DescriptorSetAllocateInfo modelAllocInfo {
+            .descriptorPool = descriptorPool, // Where the descriptor set will be allocated from
+            .descriptorSetCount = static_cast<uint32_t>( model_layouts.size() ), // the number of descriptor sets to create
+            .pSetLayouts = model_layouts.data() // what descriptor set layout each descriptor set will reference
+            };
+
+            modelObject.descriptorSets = logicalDevice.allocateDescriptorSets( modelAllocInfo );
+
+            for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+            {
+                vk::DescriptorBufferInfo modelUBOBufferInfo {
+                    .buffer = modelObject.uniformBuffers[i],
+                    .offset = 0,
+                    .range = sizeof(modelUniformBufferObject)
+                };
+
+                vk::DescriptorImageInfo modelSamplerInfo {
+                .sampler = textureSampler, // might have to make a new sampler/imageview? we SHOULD be okay?
+                .imageView = textureImageView,
+                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal
+                };
+
+                vk::WriteDescriptorSet modelUBODescriptorWrite
+                {
+                    .dstSet = modelObject.descriptorSets[i],
+                    .dstBinding = 0,
+                    .dstArrayElement = 0,
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eUniformBuffer,
+                    .pBufferInfo = &modelUBOBufferInfo
+                };
+
+                vk::WriteDescriptorSet modelSamplerDescriptorWrite {
+                    .dstSet = modelObject.descriptorSets[i],
+                    .dstBinding = 1,
+                    .dstArrayElement = 0,
+                    .descriptorCount = 1,
+                    .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+                    .pImageInfo = &modelSamplerInfo
+                };
+
+                std::array descriptorWrites { modelUBODescriptorWrite, modelSamplerDescriptorWrite };
+                logicalDevice.updateDescriptorSets( descriptorWrites, {} );
+            }
+        }
+    }
+
+    // we're updating all the objects at once.
+    void updateModelUniformBuffer( uint32_t currentImage )
+    {
+        // time used for a steady rotation -- see the previous updateUniformBuffer()!
+        static auto startTime = std::chrono::high_resolution_clock::now();
+        auto currentTime = std::chrono::high_resolution_clock::now();
+        float time = std::chrono::duration<float>(currentTime - startTime).count();
+
+        // Camera and projection matrices (shared by all objects) -- same thing as w/ updateUniformBuffer()
+        glm::mat4 view = glm::lookAt(glm::vec3(-20.0f, 30.0f, 60.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 proj = glm::perspective(glm::radians(90.0f),
+                                     static_cast<float>(swapChain_Extent_ImageResolution.width) / static_cast<float>(swapChain_Extent_ImageResolution.height),
+                                     0.1f, 350.0f);
+        proj[1][1] *= -1; // Flip Y for Vulkan
+
+        // the only real difference w/ this to updateUniformBuffer() is that we're modifying the rotation (as it's the individual's MODEL matrix)
+        // remember: the lookAt and perspective are effectively outside the model itself, so like the camera.
+
+        int i = 0;
+        for ( auto& modelObject : modelObjects )
+        {
+            // Apply continuous rotation to the object
+            // modelObject.rotation.y += 0.001f; // Slow rotation around Y axis
+
+            // the tutorial does it a little bit differently w/ rotation, but just for the sake of mimicking the previous updateBuffer, this'll do
+            // but yeah it's kinda stupid.
+            float rot_ang = glm::radians(160.0f);
+            switch (i++)
+            {
+                case 1:
+                    rot_ang = glm::radians(-160.0f);
+                    break;
+                case 2:
+                    rot_ang = glm::radians(600.0f);
+                    break;
+                default:
+                    break;
+            }
+
+            // Get the model matrix for this object
+            glm::mat4 initialRotation = glm::rotate(glm::mat4(1.0f), time * rot_ang, glm::vec3(0.0f, 1.0f, 0.0f));
+            glm::mat4 model = modelObject.getModelMatrix() * initialRotation;
+
+            // i should clean up the previous old uniformbufferobject, theyre both the same thing and house a MVP matrix... but whatever.
+            modelUniformBufferObject ubo{};
+            // this is the exact same logic as with updateUniformBuffer: we apply these MVP (i think its called?) matrices inside the GPU code (vertMain)
+            ubo.model = model;
+            ubo.view = view;
+            ubo.proj = proj;
+
+
+            memcpy( modelObject.uniformBuffersMapped[currentImage], &ubo, sizeof(ubo) );
+
+        }
+
+
+    }
+
 
     void createGraphicsPipeline()
     {
@@ -1537,12 +1714,14 @@ class HelloTriangleApplication
 
         /*---*/
 
+        std::array<vk::DescriptorSetLayout, 2> layouts { *descriptorSetLayout, *modelDescriptorSetLayout };
+
         // We need to specify the descriptor set layout during pipeline creation to tell Vulkan which descriptors (resources) the shaders will be using
             // a pipeline layout contains uniform values (essentially global objects shared across) which can alter the behaviour of our shaders without having to recreate them, (see BIG_NOTES for an elaboration.)
             // and push constants, which are a way of passing dynamic values to shaders, so allows uniform values to affect shaders.
         vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
-            .setLayoutCount = 1, // We're gonna be using a single descriptor set layout, hence 1
-            .pSetLayouts = &*descriptorSetLayout, // the descriptor set layout themselves
+            .setLayoutCount = 2, // We're gonna be using a single descriptor set layout, hence 1
+            .pSetLayouts = layouts.data(), // the descriptor set layout themselves
                 // it's elaborated upon later w/ descriptor pools and descriptor sets, but you can specify multiple layouts here.
             .pushConstantRangeCount = 0 // push constants are like descriptors but more efficient, it'll be elaborated upon later (so ig if you really care just google whats up w/ these)
         };
@@ -1938,6 +2117,132 @@ class HelloTriangleApplication
             // i should probably change recordCommandBuffer() to recordGraphicCommandBuffer(), idk, idc rn.
 
         computeCommandBuffers[wait_frameIndex].end();
+    }
+
+    void recordModelCommandBuffer( uint32_t swapChain_imageIndex )
+    {
+        commandBuffers[wait_frameIndex].begin({});
+
+        transition_image_layout (
+            swapChainImages[swapChain_imageIndex], vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
+            {}, vk::AccessFlagBits2::eColorAttachmentWrite,
+            vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+            vk::ImageAspectFlagBits::eColor
+        );
+
+        transition_image_layout(
+            colorImage,
+            vk::ImageLayout::eUndefined,
+		    vk::ImageLayout::eColorAttachmentOptimal,
+            vk::AccessFlagBits2::eColorAttachmentWrite,
+		    vk::AccessFlagBits2::eColorAttachmentWrite,
+            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+		    vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+            vk::ImageAspectFlagBits::eColor
+        );
+
+        transition_image_layout(
+            depthImage,
+            vk::ImageLayout::eUndefined,
+            vk::ImageLayout::eDepthAttachmentOptimal,
+            vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+            vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+            vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
+            vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
+            vk::ImageAspectFlagBits::eDepth
+        );
+
+
+        vk::ClearValue clearColor = vk::ClearColorValue( (199/255.0f), (160/255.0f), (148/255.0f), 1.0f);
+        vk::ClearValue clearDepth = vk::ClearDepthStencilValue( 1.0f, 0 );
+
+        vk::RenderingAttachmentInfo colourAttachmentInfo {
+            .imageView   = colorImageView,
+            .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+            .resolveMode        = vk::ResolveModeFlagBits::eAverage,
+		    .resolveImageView   = swapChainImageViews[ swapChain_imageIndex ],
+		    .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+            .loadOp      = vk::AttachmentLoadOp::eClear,
+            .storeOp     = vk::AttachmentStoreOp::eStore,
+            .clearValue  = clearColor
+        };
+
+        vk::RenderingAttachmentInfo depthAttachmentInfo {
+            .imageView   = depthImageView,
+            .imageLayout = vk::ImageLayout::eDepthAttachmentOptimal,
+            .loadOp      = vk::AttachmentLoadOp::eClear,
+            .storeOp     = vk::AttachmentStoreOp::eDontCare,
+            .clearValue  = clearDepth
+        };
+
+        vk::RenderingInfo renderingInfo {
+            .renderArea =
+            {   .offset = { 0, 0 },
+                .extent = swapChain_Extent_ImageResolution },
+            .layerCount           = 1,
+            .colorAttachmentCount = 1,
+            .pColorAttachments    = &colourAttachmentInfo,
+            .pDepthAttachment     = &depthAttachmentInfo
+        };
+
+        commandBuffers[wait_frameIndex].beginRendering( renderingInfo );
+
+        commandBuffers[wait_frameIndex].bindPipeline( vk::PipelineBindPoint::eGraphics, *graphicsPipeline );
+
+        commandBuffers[wait_frameIndex].setViewport( 0,
+            vk::Viewport(
+                0.0f, 0.0f,
+                static_cast<float>( swapChain_Extent_ImageResolution.width ), static_cast<float>( swapChain_Extent_ImageResolution.height ), // width and height
+                0.0f, 1.0f
+            )
+        );
+
+        commandBuffers[wait_frameIndex].setScissor( 0, vk::Rect2D( vk::Offset2D( 0, 0 ), swapChain_Extent_ImageResolution ) ); // same thing as the above, just formatted a little differently, but it's a rectangle of size 0,0 -> width, height
+
+
+
+        commandBuffers[wait_frameIndex].bindVertexBuffers( 0, *vertexBuffer, {0} );
+        commandBuffers[wait_frameIndex].bindIndexBuffer( *indexBuffer, 0, vk::IndexType::eUint32 );
+
+
+        // the ONLY new thing here between this function and recordCommandBuffer() is THIS. for EVERY object, bind a specific descriptor so we have the relevant data for this frame's vertices for the transformation.
+        // Draw each object with its own descriptor set
+        // FUTURE NOTE: https://docs.vulkan.org/tutorial/latest/16_Multiple_Objects.html#_performance_considerations
+            // for some performance considerations
+        for (const auto& modelObject : modelObjects)
+        {
+
+            std::array bind_descriptorSets { *descriptorSets[wait_frameIndex], *modelObject.descriptorSets[wait_frameIndex] };
+
+            // Bind the descriptor set for this object
+            commandBuffers[wait_frameIndex].bindDescriptorSets(
+                vk::PipelineBindPoint::eGraphics,
+                *pipelineLayout,
+                0,
+                bind_descriptorSets,
+                nullptr
+            );
+            // Draw the object
+            // Something REALLY interesting about drawIndexed() is that it doesn't refresh the framebuffer from nothing to draw
+            // it ADDS onto the framebuffer, hence why we loop it to add our objects
+            // I suspect this is also how particles are done, but it seems kinda excessive.
+            commandBuffers[wait_frameIndex].drawIndexed( indices.size(), 1, 0, 0, 0 );
+        }
+
+        commandBuffers[wait_frameIndex].endRendering();
+
+        transition_image_layout(
+            swapChainImages[swapChain_imageIndex],
+            vk::ImageLayout::eColorAttachmentOptimal,
+            vk::ImageLayout::ePresentSrcKHR,
+            vk::AccessFlagBits2::eColorAttachmentWrite,
+            {},
+            vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+            vk::PipelineStageFlagBits2::eBottomOfPipe,
+            vk::ImageAspectFlagBits::eColor
+        );
+
+        commandBuffers[wait_frameIndex].end();
     }
 
     // function to find and pick a depth format that is supported by our graphics card.
@@ -2515,6 +2820,24 @@ class HelloTriangleApplication
         }
     }
 
+    void setupModelObjects()
+    {
+        // Object 1 - Center
+        modelObjects[0].position = {0.0f, 0.0f, 0.0f};
+        modelObjects[0].rotation = {0.0f, 0.0f, 0.0f};
+        modelObjects[0].scale = {1.0f, 1.0f, 1.0f};
+
+        // Object 2 - Left
+        modelObjects[1].position = {0.0f, 0.0f, 30.0f};
+        modelObjects[1].rotation = {0.0f, glm::radians(0.0f), 0.0f};
+        modelObjects[1].scale = {0.50f, 0.50f, 0.50f};
+
+        // Object 3 - Right
+        modelObjects[2].position = {-17.5f, 0.0f, 25.0f};
+        modelObjects[2].rotation = {0.0f, glm::radians(0.0f), 0.0f};
+        modelObjects[2].scale = {0.10f, 0.10f, 0.10f};
+    }
+
 
     // Abstracted GPU buffer creation function -- see big_note's original createVertexBuffer() for the original.
     // first param (IN) sets the buffer's reserved memory in bytes; second param (IN) describes what this buffer'll be used for; third param (IN) specifies the memory properties we want; fourth param (OUT) is the buffer handle; fifth param (OUT) is the allocated memory itself which the buffer handle references for data storage.
@@ -2690,6 +3013,8 @@ class HelloTriangleApplication
             // For an example, mapMemory(): for the vertex buffer, we call it and then close it -- this only occurs once to feed the data to the vertex buffer, so we don't need persistent mapping for that scenario.
             // However, the uniform buffer will be updated EVERY call to drawFrame() with new data, so persistent mapping is WAY better because we don't have to map and unmap the region of memory, which, again, isn't free.
 
+            // same thing, but for the compute shader's uniform buffers.
+
             vk::DeviceSize shaderUniformBufferSize = sizeof( ComputeUniformBufferObject );
             vk::raii::Buffer shaderUniformBuffer({});
             vk::raii::DeviceMemory shaderUniformBufferMemory({});
@@ -2706,6 +3031,37 @@ class HelloTriangleApplication
             shaderUniformBuffersMemory.emplace_back( std::move( shaderUniformBufferMemory ) );
             shaderUniformBuffersMapped.emplace_back( shaderUniformBuffersMemory[i].mapMemory( 0, shaderUniformBufferSize ) );
 
+        }
+    }
+
+    // this is also the exact same thing as createUniformBuffers().
+    void createModelUniformBuffer()
+    {
+        for ( auto& modelObject : modelObjects )
+        {
+            // for every vertex we clear it -- we've seen this before.
+            modelObject.uniformBuffers.clear();
+            modelObject.uniformBuffersMemory.clear();
+            modelObject.uniformBuffersMapped.clear();
+
+            for ( int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+            {
+                vk::DeviceSize bufferSize = sizeof(modelUniformBufferObject);
+                vk::raii::Buffer tempBuffer({});
+                vk::raii::DeviceMemory tempBufferMemory({});
+
+                createGPUBuffer(
+                    bufferSize,
+                    vk::BufferUsageFlagBits::eUniformBuffer,
+                    vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+                    tempBuffer,
+                    tempBufferMemory
+                );
+
+                modelObject.uniformBuffers.emplace_back( std::move( tempBuffer ) );
+                modelObject.uniformBuffersMemory.emplace_back( std::move( tempBufferMemory ) );
+                modelObject.uniformBuffersMapped.emplace_back( modelObject.uniformBuffersMemory[i].mapMemory( 0, bufferSize ) );
+            }
         }
     }
 

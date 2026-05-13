@@ -38,6 +38,13 @@ struct VertexOutput {
     float2 fragmentTextureCoords;
 };
 
+struct modelUniformBuffer {
+    float4x4 model;
+    float4x4 view;
+    float4x4 proj;
+};
+[[vk::binding(0, 1)]] ConstantBuffer<modelUniformBuffer> m_ubo;
+
 // This function is called upon for EVERY vertex. Calculates the position and per-vector data, like color.
     // Slang supports multiple entry points in one file, hence why we're calling it "vertMain" instead of "main"
 [shader("vertex")] // Identifies the function as a Vertex Shader; if left out, the GPU won't know what function to call upon to act as the Vertex Shader.
@@ -47,7 +54,7 @@ VertexOutput vertMain( VertexInput input )
 
     // SEE BIG_NOTES_MATH FOR A MUCH NEEDED ELABORATION. mul() just multiplies two matrices.
     // this ENTIRE line is JUST: ( projection * ( view * model ) ) -- SEE BIG_NOTES_MATH I BEG
-    output.sv_position = mul( ubo.proj, mul( ubo.view, mul( ubo.model, float4( input.inPosition, 1.0 ) ) ) );
+    output.sv_position = mul( m_ubo.proj, mul( m_ubo.view, mul( m_ubo.model, float4( input.inPosition, 1.0 ) ) ) );
     // AFTER it executes, output.sv_position are coords in CLIP SPACE, and W will NOT guaranteed to be 1.0 because we're simulating DEPTH/FoV
     // w will used in perspective projection as the perspective division and is essential for making closer objects look larger than objects that are further away.
 
@@ -68,7 +75,7 @@ VertexOutput vertMain( VertexInput input )
     return output;
 }
 
-[[vk::binding(1, 0)]] Sampler2D texture; // A sampler represents a combined image sampler descriptor in Slang -- there's also an equivalent sampler1D and sampler3D for other types of images.
+[[vk::binding(1, 1)]] Sampler2D texture; // A sampler represents a combined image sampler descriptor in Slang -- there's also an equivalent sampler1D and sampler3D for other types of images.
 // This function is called upon for EVERY fragment (similarly to how vertMain is called upon for EVERY vertex)
 [shader("fragment")] // Identifies the function as a Fragment Shader; if left out, the GPU won't know what function to call upon to act as the Fragment Shader.
 float4 fragMain(VertexOutput inVert) : SV_Target // SV_Target specifies the index of the specific framebuffer we're outputting/displaying to.
