@@ -14,8 +14,10 @@ project( vulkanStuff )
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE) # cmake guarantees the standard used -- doesn't automatically fallback to an older version
 
+# we're compiling all the files in a dir/folder, specify where it is.
+file(GLOB_RECURSE SRC_FILES "src/*.cpp")
 #the actual executable we're creating (first param) from a .cpp file (second param) -- path is relative to where this CMakeLists.txt is present
-add_executable(main src/main.cpp)
+add_executable(main ${SRC_FILES})
 
 # ${var} is set by set these, you could ditch these by replacing ever ${var} with $ENV{var}
 set(VULKAN_SDK $ENV{VULKAN_SDK})
@@ -34,6 +36,7 @@ ${GLFW}
 ${SLANG}/include
 "C:/stb" # lazy
 "C:/mSys_Stuff/ucrt64/include" # lazy
+${CMAKE_SOURCE_DIR}/headers #cmakesourcedir is where cmakelists is present.
 )
 
 # Where we find libs (the actual code).
@@ -68,26 +71,26 @@ endfunction()
 add_slang_shader_target( shaders )
 add_dependencies(main shaders)
 
-function (add_slang_compute_shader_target TARGET)
-  cmake_parse_arguments ("SHADER" "" "" "SOURCES" ${ARGN})
-  set (SHADERS_DIR ${CMAKE_CURRENT_LIST_DIR}/shaders)
-  set (ENTRY_POINTS -entry compMain)
-  set (SHADER_SOURCES ${SHADERS_DIR}/compute.slang)
-  add_custom_command (
-          OUTPUT ${SHADERS_DIR}
-          COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADERS_DIR}
-  )
-  add_custom_command (
-          OUTPUT  ${SHADERS_DIR}/compute.spv
-          COMMAND cmd /c ${SHADERS_DIR}/compile.bat # for some reason the slang compiler below is... whatever.
-          COMMAND "${SLANG}/bin/slangc.exe" ${SHADER_SOURCES} -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o ${SHADERS_DIR}/compute.spv
-          WORKING_DIRECTORY ${SHADERS_DIR}
-          DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
-          COMMENT "Compiling Slang Compute Shaders"
-          VERBATIM
-  )
-  add_custom_target (${TARGET} DEPENDS ${SHADERS_DIR}/compute.spv)
-endfunction()
+# function (add_slang_compute_shader_target TARGET)
+#   cmake_parse_arguments ("SHADER" "" "" "SOURCES" ${ARGN})
+#   set (SHADERS_DIR ${CMAKE_CURRENT_LIST_DIR}/shaders)
+#   set (ENTRY_POINTS -entry compMain)
+#   set (SHADER_SOURCES ${SHADERS_DIR}/compute.slang)
+#   add_custom_command (
+#           OUTPUT ${SHADERS_DIR}
+#           COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADERS_DIR}
+#   )
+#   add_custom_command (
+#           OUTPUT  ${SHADERS_DIR}/compute.spv
+#           COMMAND cmd /c ${SHADERS_DIR}/compile.bat # for some reason the slang compiler below is... whatever.
+#           COMMAND "${SLANG}/bin/slangc.exe" ${SHADER_SOURCES} -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o ${SHADERS_DIR}/compute.spv
+#           WORKING_DIRECTORY ${SHADERS_DIR}
+#           DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
+#           COMMENT "Compiling Slang Compute Shaders"
+#           VERBATIM
+#   )
+#   add_custom_target (${TARGET} DEPENDS ${SHADERS_DIR}/compute.spv)
+# endfunction()
 
-add_slang_compute_shader_target( compute_shaders )
-add_dependencies(main compute_shaders)
+# add_slang_compute_shader_target( compute_shaders )
+# add_dependencies(main compute_shaders)

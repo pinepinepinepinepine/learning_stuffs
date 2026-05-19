@@ -16,18 +16,14 @@ import vulkan_hpp;
 // 3rd party libs
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.h> // https://github.com/KhronosGroup/Vulkan-Headers/blob/main/include/vulkan/vulkan.h (gateway to a bunch of other garbage)
+#define GLM_ENABLE_EXPERIMENTAL // for the hash<glm::vec3> usage in vertex.cpp
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/hash.hpp>
 
-#define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-#define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
-
-// for the hash<glm::vec3> usage in vertex.cpp
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/gtx/hash.hpp>
 
 // window stuff
 #define GLFW_EXPOSE_NATIVE_WIN32    // Required to define for the #include below -- allows GLFW to show Windows handles (HWND/hInstance access)
@@ -44,6 +40,7 @@ import vulkan_hpp;
 #include <chrono>
 #include <unordered_map>
 #include <random>
-
-// my utils
-#include "random_utils.cpp"
+#include <atomic>
+#include <thread>
+#include <bitset>
+#include <condition_variable>
