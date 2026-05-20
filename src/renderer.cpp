@@ -22,12 +22,15 @@ void RenderApplication::setup()
     catModel.loadModel( device, "../models/spin.obj" );
 
     createMVPUBOBuffers();
-
     createDebugBuffers();
+    createParticleComputeBuffers();
 
-    createDescriptors();
+    createDescriptorPool();
+    createModelDescriptors();
+    createParticleDescriptors();
 
     createVertexGraphicsPipeline();
+    createParticleGraphicsPipeline();
 }
 
 void RenderApplication::createVertexGraphicsPipeline()
@@ -41,9 +44,25 @@ void RenderApplication::createVertexGraphicsPipeline()
         .vertexBindingDescriptionCount   = 1, .pVertexBindingDescriptions = &bindingDescription,
         .vertexAttributeDescriptionCount = static_cast<uint32_t>( attributeDescriptions.size() ), .pVertexAttributeDescriptions = attributeDescriptions.data() };
 
-    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/slang.spv" ); // WE NEED TO CREATE A SHADER MODULE + COMPILE.BAT
+    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/slang.spv" );
 
     graphicPipeline.createGraphicsPipeline( device, shaderModules, swapChain, vertexInputInfo );
+}
+
+void RenderApplication::createParticleGraphicsPipeline()
+{
+    std::vector<vk::DescriptorSetLayout> vertexPipelineDescriptorSetLayouts { particleDescriptors.descriptorSetLayout };
+    particlePipeline.createPipelineDescriptorLayout( device.logicalDevice, vertexPipelineDescriptorSetLayouts );
+
+    auto bindingDescription    = Particle::getBindingDescription();
+    auto attributeDescriptions = Particle::getAttributeDescriptions();
+    vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
+        .vertexBindingDescriptionCount   = 1, .pVertexBindingDescriptions = &bindingDescription,
+        .vertexAttributeDescriptionCount = static_cast<uint32_t>( attributeDescriptions.size() ), .pVertexAttributeDescriptions = attributeDescriptions.data() };
+
+    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/particle.spv" ); // todo: make this.
+
+    particlePipeline.createGraphicsPipeline( device, shaderModules, swapChain, vertexInputInfo );
 }
 
 void RenderApplication::createCommandPools()
@@ -70,8 +89,8 @@ void RenderApplication::createMVPUBOBuffers()
         individualBuffer.createGPUBuffer(
             device,
             sizeof(mvpUBOBuffer),
-            vk::BufferUsageFlagBits::eUniformBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, // TODO: make this device local probs. mule the data over.
             true );
 
         mvp_uboBuffers.emplace_back( std::move(individualBuffer) );
@@ -92,6 +111,32 @@ void RenderApplication::createDebugBuffers()
             true );
 
         debug_uboBuffers.emplace_back( std::move(individualBuffer) );
+    }
+}
+
+void RenderApplication::createParticleComputeBuffers()
+{
+    particle_storageBuffers_currentFrame.clear();
+    particle_storageBuffers_uboMule.clear();
+    for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+    {
+        GPUBuffer individualStorageBuffer;
+        individualStorageBuffer.createGPUBuffer(
+            device,
+            sizeof(Particle) * PARTICLE_COUNT,
+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer, // Why vertexBuffer? figure out later.
+            vk::MemoryPropertyFlagBits::eDeviceLocal,
+            true );
+        particle_storageBuffers_currentFrame.emplace_back( std::move(individualStorageBuffer) );
+
+        GPUBuffer individualUBOBuffer;
+        individualUBOBuffer.createGPUBuffer(
+            device,
+            sizeof(ParticleTime),
+            vk::BufferUsageFlagBits::eUniformBuffer,
+            vk::MemoryPropertyFlagBits::eHostCoherent | vk::MemoryPropertyFlagBits::eHostVisible,
+            true );
+        particle_storageBuffers_uboMule.emplace_back( std::move(individualUBOBuffer) );
     }
 }
 
@@ -134,13 +179,23 @@ void RenderApplication::createAttachmentImages()
         vk::ImageUsageFlagBits::eDepthStencilAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageAspectFlagBits::eDepth ); // TODO: Should DepthImage also be eTransientAttachment?
 }
 
-void RenderApplication::createDescriptors()
+void RenderApplication::createDescriptorPool()
 {
+    // Models
     vk::DescriptorPoolSize uboPoolSize( vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT );
     vk::DescriptorPoolSize samplerPoolSize( vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT );
     vk::DescriptorPoolSize debugUBOPoolSize( vk::DescriptorType::eStorageBuffer, MAX_FRAMES_IN_FLIGHT );
-    std::vector<vk::DescriptorPoolSize> poolSize { uboPoolSize, samplerPoolSize, debugUBOPoolSize };
-    descriptorPool = DescriptorPool::createDescriptorPool( device.logicalDevice, poolSize, MAX_FRAMES_IN_FLIGHT );
+
+    // Particles
+    vk::DescriptorPoolSize particleStoragePoolSize( vk::DescriptorType::eStorageBuffer, MAX_FRAMES_IN_FLIGHT * 2 );
+    vk::DescriptorPoolSize particleUBOPoolSize( vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT );
+
+    std::vector<vk::DescriptorPoolSize> poolSize { uboPoolSize, samplerPoolSize, debugUBOPoolSize, particleStoragePoolSize, particleUBOPoolSize };
+    descriptorPool = DescriptorPool::createDescriptorPool( device.logicalDevice, poolSize, MAX_FRAMES_IN_FLIGHT * 2 ); // *2 because of models + particles, a distinct set per. check if right.
+}
+
+void RenderApplication::createModelDescriptors()
+{
     descriptors.setDescriptorsPool( descriptorPool );
 
     vk::DescriptorSetLayoutBinding uboLayoutBinding(
@@ -168,9 +223,44 @@ void RenderApplication::createDescriptors()
 
     for ( int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
     {
-        descriptors.setUBOResource( device.logicalDevice, mvp_uboBuffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(mvpUBOBuffer), i, 0 );
+        descriptors.setBufferResource( device.logicalDevice, mvp_uboBuffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(mvpUBOBuffer), i, 0 );
         descriptors.setSamplerResource( device.logicalDevice, *catTexture.textureSampler, catTexture.textureImage.imageView, i, 1 );
-        descriptors.setUBOResource( device.logicalDevice, debug_uboBuffers[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Vertex) * catModel.vertices_count, i, 2 );
+        descriptors.setBufferResource( device.logicalDevice, debug_uboBuffers[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Vertex) * catModel.vertices_count, i, 2 );
+    }
+}
+
+void RenderApplication::createParticleDescriptors()
+{
+    particleDescriptors.setDescriptorsPool( descriptorPool );
+
+    vk::DescriptorSetLayoutBinding particleStorageLayoutBinding_previousFrame(
+        0,
+        vk::DescriptorType::eStorageBuffer,
+        1,
+        vk::ShaderStageFlagBits::eCompute,
+        nullptr );
+    vk::DescriptorSetLayoutBinding particleStorageLayoutBinding_currentFrame(
+        1,
+        vk::DescriptorType::eStorageBuffer,
+        1, // TODO: We can use this instead (make it a 2, bundle it with prevFrame), but it'd require a change-up for our compute shader code.
+        vk::ShaderStageFlagBits::eCompute,
+        nullptr );
+    vk::DescriptorSetLayoutBinding particleStorageLayoutBinding_uboMule(
+        2,
+        vk::DescriptorType::eUniformBuffer,
+        1,
+        vk::ShaderStageFlagBits::eCompute,
+        nullptr );
+    std::vector<vk::DescriptorSetLayoutBinding> layoutBindings { particleStorageLayoutBinding_previousFrame, particleStorageLayoutBinding_currentFrame, particleStorageLayoutBinding_uboMule };
+    particleDescriptors.createDescriptorSetLayout( device.logicalDevice, layoutBindings );
+
+    particleDescriptors.createEmptyDescriptorSets( device.logicalDevice, MAX_FRAMES_IN_FLIGHT );
+
+    for ( int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+    {
+        particleDescriptors.setBufferResource( device.logicalDevice, particle_storageBuffers_currentFrame[(i + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Particle) * PARTICLE_COUNT, i, 0 ); // TODO: fix the name, it's a general purpose setResource, not UBO exclusive.
+        particleDescriptors.setBufferResource( device.logicalDevice, particle_storageBuffers_currentFrame[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Particle) * PARTICLE_COUNT, i, 1 );
+        particleDescriptors.setBufferResource( device.logicalDevice, particle_storageBuffers_uboMule[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(ParticleTime), i, 2 );
     }
 }
 

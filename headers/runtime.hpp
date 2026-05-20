@@ -19,8 +19,8 @@ struct RunTimeApplication
 
     void updateMVPUBOBuffer();
     void recordCatCommandBuffer( uint32_t currentImageIndex );
+    void recordParticleCommandBuffer( uint32_t currentImageIndex );
     void presentToWindow( uint32_t currentImageIndex, vk::PipelineStageFlags pipelineWaitStage, uint64_t waitForValue, uint64_t signalValue );
-
 
     void drawFrame();
     void mainLoop();

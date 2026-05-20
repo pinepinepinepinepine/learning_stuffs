@@ -7,7 +7,7 @@ namespace PipelineUtils
         std::ifstream file( filename, std::ios::ate | std::ios::binary );
 
         if ( !file.is_open() )
-            throw std::runtime_error("failed to open file!");
+            throw std::runtime_error("failed to open shader module file!");
 
         std::vector<char> codeSPV( file.tellg() );
         file.seekg( 0, std::ios::beg );
@@ -122,13 +122,13 @@ void Pipeline::createPipelineDescriptorLayout( const vk::raii::Device& device, c
     pipelineLayout = vk::raii::PipelineLayout( device, pipelineLayoutInfo );
 }
 
-void Pipeline::createGraphicsPipeline( const LogicalDevice& device, const vk::raii::ShaderModule& shaderModule, const SwapChain& framebuffer, const vk::PipelineVertexInputStateCreateInfo& vertexInputInfo )
+void Pipeline::createGraphicsPipeline( const LogicalDevice& device, const vk::raii::ShaderModule& shaderModule, const SwapChain& framebufferProperties, const vk::PipelineVertexInputStateCreateInfo& vertexInputInfo )
 {
     std::vector<vk::PipelineShaderStageCreateInfo> programmableModulesCreateInfo = createProgrammableModules( shaderModule );
 
     vk::PipelineInputAssemblyStateCreateInfo inputAssemblyCreateInfo { .topology = vk::PrimitiveTopology::eTriangleList };
 
-    vk::PipelineViewportStateCreateInfo viewportCreateInfo = createViewport( framebuffer.imageResolution );
+    vk::PipelineViewportStateCreateInfo viewportCreateInfo = createViewport( framebufferProperties.imageResolution );
     vk::PipelineRasterizationStateCreateInfo rasterizerCreateInfo = createRasterizer();
     vk::PipelineMultisampleStateCreateInfo multisamplingCreateInfo = createMultisampling( device.msaaSamples );
     vk::PipelineDepthStencilStateCreateInfo depthStencilCreateInfo = createDepthStencil();
@@ -161,7 +161,7 @@ void Pipeline::createGraphicsPipeline( const LogicalDevice& device, const vk::ra
     vk::Format depthFormat = device.findSupportedFormat(
         { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint },
         vk::ImageTiling::eOptimal, vk::FormatFeatureFlagBits::eDepthStencilAttachment );
-    vk::PipelineRenderingCreateInfo renderingCreateInfo = createRendering( framebuffer.surfaceFormat.format, depthFormat );
+    vk::PipelineRenderingCreateInfo renderingCreateInfo = createRendering( framebufferProperties.surfaceFormat.format, depthFormat );
 
     vk::StructureChain<vk::GraphicsPipelineCreateInfo, vk::PipelineRenderingCreateInfo> pipelineCreateInfo { graphicsPipelineCreateInfo, renderingCreateInfo };
 

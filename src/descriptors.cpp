@@ -47,7 +47,7 @@ void Descriptor::createEmptyDescriptorSets( const vk::raii::Device& device, uint
     descriptorSets = device.allocateDescriptorSets( allocInfo );
 }
 
-void Descriptor::setUBOResource(
+void Descriptor::setBufferResource(
     const vk::raii::Device& device, const vk::raii::Buffer& ubo, vk::DescriptorType type, vk::DeviceSize range, size_t descriptorSetIndex, uint32_t binding )
 {
     vk::DescriptorBufferInfo uboBufferInfo {

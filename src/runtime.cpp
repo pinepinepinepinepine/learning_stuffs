@@ -78,7 +78,7 @@ void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
         .imageView          = app->depthImage.imageView,
         .imageLayout        = vk::ImageLayout::eDepthAttachmentOptimal,
         .loadOp             = vk::AttachmentLoadOp::eClear,
-        .storeOp            = vk::AttachmentStoreOp::eDontCare,
+        .storeOp            = vk::AttachmentStoreOp::eStore,
         .clearValue = clearDepth };
 
     vk::RenderingInfo renderingInfo {
@@ -102,6 +102,33 @@ void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
 
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
 }
+
+void RunTimeApplication::recordParticleCommandBuffer( uint32_t currentImageIndex )
+{
+    vk::RenderingAttachmentInfo colourAttachmentInfo {
+        .imageView          = app->colourImage.imageView,
+        .imageLayout        = vk::ImageLayout::eColorAttachmentOptimal,
+        .resolveMode        = vk::ResolveModeFlagBits::eAverage,
+        .resolveImageView   = app->swapChain.swapChainImages[currentImageIndex].imageView,
+        .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+        .loadOp             = vk::AttachmentLoadOp::eLoad,
+        .storeOp            = vk::AttachmentStoreOp::eStore };
+
+    vk::RenderingAttachmentInfo depthAttachmentInfo {
+        .imageView          = app->depthImage.imageView,
+        .imageLayout        = vk::ImageLayout::eDepthAttachmentOptimal,
+        .loadOp             = vk::AttachmentLoadOp::eLoad,
+        .storeOp            = vk::AttachmentStoreOp::eStore };
+
+    vk::RenderingInfo renderingInfo {
+        .renderArea           = { .offset = { 0, 0 }, .extent = app->swapChain.imageResolution },
+        .layerCount           = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments    = &colourAttachmentInfo,
+        .pDepthAttachment     = &depthAttachmentInfo };
+
+}
+
 
 void RunTimeApplication::presentToWindow( uint32_t currentImageIndex, vk::PipelineStageFlags pipelineWaitStage, uint64_t waitForValue, uint64_t signalValue )
 {

@@ -10,6 +10,7 @@
 #include "pipeline.hpp"
 #include "vertex.hpp"
 #include "model.hpp"
+#include "particle.hpp"
 
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -33,26 +34,34 @@ struct RenderApplication
 
     vk::raii::DescriptorPool descriptorPool = nullptr;
     Descriptor descriptors;
+    Descriptor particleDescriptors;
 
     std::vector<GPUBuffer> mvp_uboBuffers;
     std::vector<GPUBuffer> debug_uboBuffers;
+    std::vector<GPUBuffer> particle_storageBuffers_currentFrame;
+    std::vector<GPUBuffer> particle_storageBuffers_uboMule;
 
     SwapChain swapChain;
     Image colourImage;
     Image depthImage;
 
     Pipeline graphicPipeline;
+    Pipeline particlePipeline;
 
     ModelData catModel;
 
     void setup();
     void createVertexGraphicsPipeline();
+    void createParticleGraphicsPipeline();
     void createCommandPools();
     void createDedicatedCommandBuffers();
     void createMVPUBOBuffers();
     void createDebugBuffers();
+    void createParticleComputeBuffers();
     vk::raii::Sampler createTextureSampler();
     void createAttachmentImages();
-    void createDescriptors();
+    void createDescriptorPool();
+    void createModelDescriptors();
+    void createParticleDescriptors();
     void cleanup();
 };
