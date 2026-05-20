@@ -92,9 +92,6 @@ void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
 
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindPipeline( vk::PipelineBindPoint::eGraphics, app->graphicPipeline.pipeline );
 
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].setViewport(0, vk::Viewport(0.0f, 0.0f, static_cast<float>(app->swapChain.imageResolution.width), static_cast<float>(app->swapChain.imageResolution.height), 0.0f, 1.0f));
-	app->cmdBuffers.commandBuffers[executingCommandBufferIndex].setScissor(0, vk::Rect2D(vk::Offset2D(0, 0), app->swapChain.imageResolution));
-
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindVertexBuffers(0, *app->catModel.vertexBuffer.gpuBuffer, {0} );
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindIndexBuffer( *app->catModel.indexBuffer.gpuBuffer, 0, vk::IndexType::eUint32 );
 
@@ -102,9 +99,6 @@ void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
        vk::PipelineBindPoint::eGraphics, app->graphicPipeline.pipelineLayout, 0, *app->descriptors.descriptorSets[executingCommandBufferIndex], nullptr );
 
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].drawIndexed( app->catModel.indices_count, 1, 0, 0, 0 ); // todo: is there a better alternative for indices_count?
-
-
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].draw(3, 1, 0, 0);
 
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
 }
@@ -187,5 +181,3 @@ void RunTimeApplication::run()
 
     mainLoop();
 }
-
-// todo: record Command Buffer and then submission into the graphics queue.

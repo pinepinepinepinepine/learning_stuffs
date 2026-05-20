@@ -3,7 +3,7 @@ struct VSInput {
     float3 inColor;
     float2 inTexCoord;
 };
-//[[vk::binding(2, 0)]] RWStructuredBuffer<VSInput> debugVertexInput;
+[[vk::binding(2, 0)]] RWStructuredBuffer<VSInput> debugVertexInput;
 
 struct VSOutput
 {
@@ -22,8 +22,7 @@ struct modelUniformBuffer {
 [shader("vertex")]
 VSOutput vertMain(VSInput input) {
     VSOutput output;
-    //output.pos = mul(m_ubo.proj, mul(m_ubo.view, mul(m_ubo.model, float4(input.inPosition, 1.0))));
-    output.pos = { input.inPosition, 1 };
+    output.pos = mul(m_ubo.proj, mul(m_ubo.view, mul(m_ubo.model, float4(input.inPosition, 1.0))));
     output.fragColor = input.inColor;
     output.fragTexCoord = input.inTexCoord;
     return output;

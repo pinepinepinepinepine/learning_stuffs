@@ -59,7 +59,7 @@ vk::PipelineRasterizationStateCreateInfo Pipeline::createRasterizer()
         .rasterizerDiscardEnable = vk::False,
         .polygonMode             = vk::PolygonMode::eFill,
         .cullMode                = vk::CullModeFlagBits::eBack,
-        .frontFace               = vk::FrontFace::eCounterClockwise,
+        .frontFace               = vk::FrontFace::eCounterClockwise, // CLOCKWISE OR COUNTERCLOCKWISE?
         .depthBiasEnable         = vk::False,
         .lineWidth               = 1.0f };
     return rasterizerCreateInfo;
@@ -87,22 +87,13 @@ vk::PipelineDepthStencilStateCreateInfo Pipeline::createDepthStencil()
     return depthStencilCreateInfo;
 }
 
-vk::PipelineColorBlendStateCreateInfo Pipeline::createColorBlending()
+vk::PipelineColorBlendStateCreateInfo Pipeline::createColorBlending( vk::PipelineColorBlendAttachmentState& colorAttachmentInfo )
 {
-    vk::PipelineColorBlendAttachmentState colorBlendAttachment {
-        .blendEnable         = vk::True,
-        .srcColorBlendFactor = vk::BlendFactor::eSrcAlpha,
-        .dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
-        .colorBlendOp        = vk::BlendOp::eAdd,
-        .srcAlphaBlendFactor = vk::BlendFactor::eOne,
-        .dstAlphaBlendFactor = vk::BlendFactor::eZero,
-        .alphaBlendOp        = vk::BlendOp::eAdd,
-        .colorWriteMask      = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA };
     vk::PipelineColorBlendStateCreateInfo colorBlendingCreateInfo {
         .logicOpEnable = vk::False,
         .logicOp = vk::LogicOp::eCopy,
         .attachmentCount = 1,
-        .pAttachments = &colorBlendAttachment };
+        .pAttachments = &colorAttachmentInfo };
     return colorBlendingCreateInfo;
 }
 
@@ -117,6 +108,12 @@ vk::PipelineRenderingCreateInfo Pipeline::createRendering( const vk::Format& col
 
 void Pipeline::createPipelineDescriptorLayout( const vk::raii::Device& device, const std::vector<vk::DescriptorSetLayout>& descriptorSetLayouts )
 {
+    if ( descriptorSetLayouts.empty() ) // we can probably remove this.
+    {
+        pipelineLayout = vk::raii::PipelineLayout( device, { .setLayoutCount = 0, .pushConstantRangeCount = 0 } );
+        return;
+    }
+
     vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
         .setLayoutCount = static_cast<uint32_t>(descriptorSetLayouts.size()),
         .pSetLayouts = descriptorSetLayouts.data(),
@@ -132,27 +129,32 @@ void Pipeline::createGraphicsPipeline( const LogicalDevice& device, const vk::ra
     vk::PipelineInputAssemblyStateCreateInfo inputAssemblyCreateInfo { .topology = vk::PrimitiveTopology::eTriangleList };
 
     vk::PipelineViewportStateCreateInfo viewportCreateInfo = createViewport( framebuffer.imageResolution );
-    // WE'RE NOT BAKING IT INTO THE PIPELINE ANYMORE (VIEWPORT IS DYNAMIC, ABOVE LINE IS USELESS)
-    vk::PipelineViewportStateCreateInfo      viewportState{.viewportCount = 1, .scissorCount = 1};
-	std::vector<vk::DynamicState>      dynamicStates = {vk::DynamicState::eViewport, vk::DynamicState::eScissor};
-	vk::PipelineDynamicStateCreateInfo dynamicState{.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()), .pDynamicStates = dynamicStates.data()};
-
     vk::PipelineRasterizationStateCreateInfo rasterizerCreateInfo = createRasterizer();
     vk::PipelineMultisampleStateCreateInfo multisamplingCreateInfo = createMultisampling( device.msaaSamples );
     vk::PipelineDepthStencilStateCreateInfo depthStencilCreateInfo = createDepthStencil();
-    vk::PipelineColorBlendStateCreateInfo colorBlendCreateInfo = createColorBlending();
+
+    vk::PipelineColorBlendAttachmentState colorBlendAttachment { // Need to pass this because otherwise createInfo'll house a dangling reference.
+        .blendEnable         = vk::True,
+        .srcColorBlendFactor = vk::BlendFactor::eSrcAlpha,
+        .dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
+        .colorBlendOp        = vk::BlendOp::eAdd,
+        .srcAlphaBlendFactor = vk::BlendFactor::eOne,
+        .dstAlphaBlendFactor = vk::BlendFactor::eZero,
+        .alphaBlendOp        = vk::BlendOp::eAdd,
+        .colorWriteMask      = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA };
+    vk::PipelineColorBlendStateCreateInfo colorBlendCreateInfo = createColorBlending( colorBlendAttachment );
 
     vk::GraphicsPipelineCreateInfo graphicsPipelineCreateInfo {
     .stageCount          = static_cast<uint32_t>(programmableModulesCreateInfo.size()),
     .pStages             = programmableModulesCreateInfo.data(),
     .pVertexInputState   = &vertexInputInfo, // Is there a better way or just leave it to the caller? Maybe a member or something? idk.
     .pInputAssemblyState = &inputAssemblyCreateInfo,
-    .pViewportState      = &viewportState, // SWAP THIS TO VIEWPORTCREATEINFO IF BAKED, AND DELETE THE .SETVIEWPORT/SCISSOR IN SUBMISSION
+    .pViewportState      = &viewportCreateInfo,
     .pRasterizationState = &rasterizerCreateInfo,
     .pMultisampleState   = &multisamplingCreateInfo,
     .pDepthStencilState  = &depthStencilCreateInfo,
     .pColorBlendState    = &colorBlendCreateInfo,
-    .pDynamicState       = &dynamicState, // PUT THIS BACK TO NULLPTR IF BAKED
+    .pDynamicState       = nullptr,
     .layout              = pipelineLayout,
     .renderPass          = nullptr };
 
