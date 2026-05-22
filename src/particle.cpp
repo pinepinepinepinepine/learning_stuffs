@@ -9,6 +9,6 @@ vk::VertexInputBindingDescription Particle::getBindingDescription()
 std::array<vk::VertexInputAttributeDescription, 2> Particle::getAttributeDescriptions()
 {
     	return {
-		    vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Particle, position)),
+		    vk::VertexInputAttributeDescription(0, 0, vk::Format::eR32G32Sfloat, offsetof(Particle, position)),
 		    vk::VertexInputAttributeDescription(1, 0, vk::Format::eR32G32B32A32Sfloat, offsetof(Particle, color)) };
 }

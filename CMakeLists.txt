@@ -71,26 +71,51 @@ endfunction()
 add_slang_shader_target( shaders )
 add_dependencies(main shaders)
 
-# function (add_slang_compute_shader_target TARGET)
-#   cmake_parse_arguments ("SHADER" "" "" "SOURCES" ${ARGN})
-#   set (SHADERS_DIR ${CMAKE_CURRENT_LIST_DIR}/shaders)
-#   set (ENTRY_POINTS -entry compMain)
-#   set (SHADER_SOURCES ${SHADERS_DIR}/compute.slang)
-#   add_custom_command (
-#           OUTPUT ${SHADERS_DIR}
-#           COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADERS_DIR}
-#   )
-#   add_custom_command (
-#           OUTPUT  ${SHADERS_DIR}/compute.spv
-#           COMMAND cmd /c ${SHADERS_DIR}/compile.bat # for some reason the slang compiler below is... whatever.
-#           COMMAND "${SLANG}/bin/slangc.exe" ${SHADER_SOURCES} -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o ${SHADERS_DIR}/compute.spv
-#           WORKING_DIRECTORY ${SHADERS_DIR}
-#           DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
-#           COMMENT "Compiling Slang Compute Shaders"
-#           VERBATIM
-#   )
-#   add_custom_target (${TARGET} DEPENDS ${SHADERS_DIR}/compute.spv)
-# endfunction()
+function (add_slang_graphics_shader_target TARGET)
+  cmake_parse_arguments ("SHADER" "" "" "SOURCES" ${ARGN})
+  set (SHADERS_DIR ${CMAKE_CURRENT_LIST_DIR}/shaders)
+  set (ENTRY_POINTS -entry vertMain -entry fragMain)
+  set (SHADER_SOURCES ${SHADERS_DIR}/particle_graphics.slang)
+  add_custom_command (
+          OUTPUT ${SHADERS_DIR}
+          COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADERS_DIR}
+  )
+  add_custom_command (
+          OUTPUT  ${SHADERS_DIR}/particle_graphics.spv
+          COMMAND cmd /c ${SHADERS_DIR}/compile.bat # for some reason the slang compiler below is... whatever.
+          COMMAND "${SLANG}/bin/slangc.exe" ${SHADER_SOURCES} -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o ${SHADERS_DIR}/particle_graphics.spv
+          WORKING_DIRECTORY ${SHADERS_DIR}
+          DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
+          COMMENT "Compiling Slang Graphic Particle Shaders"
+          VERBATIM
+  )
+  add_custom_target (${TARGET} DEPENDS ${SHADERS_DIR}/particle_graphics.spv)
+endfunction()
 
-# add_slang_compute_shader_target( compute_shaders )
-# add_dependencies(main compute_shaders)
+add_slang_graphics_shader_target( compute_shaders_g )
+add_dependencies(main compute_shaders_g)
+
+
+function (add_slang_compute_shader_target TARGET)
+  cmake_parse_arguments ("SHADER" "" "" "SOURCES" ${ARGN})
+  set (SHADERS_DIR ${CMAKE_CURRENT_LIST_DIR}/shaders)
+  set (ENTRY_POINTS -entry compMain)
+  set (SHADER_SOURCES ${SHADERS_DIR}/particle_compute.slang)
+  add_custom_command (
+          OUTPUT ${SHADERS_DIR}
+          COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADERS_DIR}
+  )
+  add_custom_command (
+          OUTPUT  ${SHADERS_DIR}/particle_compute.spv
+          COMMAND cmd /c ${SHADERS_DIR}/compile.bat # for some reason the slang compiler below is... whatever.
+          COMMAND "${SLANG}/bin/slangc.exe" ${SHADER_SOURCES} -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o ${SHADERS_DIR}/particle_compute.spv
+          WORKING_DIRECTORY ${SHADERS_DIR}
+          DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
+          COMMENT "Compiling Slang Compute Particle Shaders"
+          VERBATIM
+  )
+  add_custom_target (${TARGET} DEPENDS ${SHADERS_DIR}/particle_compute.spv)
+endfunction()
+
+add_slang_compute_shader_target( compute_shaders )
+add_dependencies(main compute_shaders)

@@ -58,7 +58,7 @@ vk::PipelineRasterizationStateCreateInfo Pipeline::createRasterizer()
         .depthClampEnable        = vk::False,
         .rasterizerDiscardEnable = vk::False,
         .polygonMode             = vk::PolygonMode::eFill,
-        .cullMode                = vk::CullModeFlagBits::eBack,
+        .cullMode                = vk::CullModeFlagBits::eBack, // fucking add back culling whenever we're finished. eNone for none, eBack for default.
         .frontFace               = vk::FrontFace::eCounterClockwise, // CLOCKWISE OR COUNTERCLOCKWISE?
         .depthBiasEnable         = vk::False,
         .lineWidth               = 1.0f };
@@ -77,10 +77,20 @@ vk::PipelineMultisampleStateCreateInfo Pipeline::createMultisampling( vk::Sample
 
 vk::PipelineDepthStencilStateCreateInfo Pipeline::createDepthStencil()
 {
+    // ADD THIS GARBAGE BACK
+    // vk::PipelineDepthStencilStateCreateInfo depthStencilCreateInfo {
+    //     .depthTestEnable       = vk::True,
+    //     .depthWriteEnable      = vk::True,
+    //     .depthCompareOp        = vk::CompareOp::eLess,
+    //     .depthBoundsTestEnable = vk::False,
+    //     .stencilTestEnable     = vk::False
+    // };
+
+
     vk::PipelineDepthStencilStateCreateInfo depthStencilCreateInfo {
-        .depthTestEnable       = vk::True,
-        .depthWriteEnable      = vk::True,
-        .depthCompareOp        = vk::CompareOp::eLess,
+        .depthTestEnable       = vk::False,
+        .depthWriteEnable      = vk::False,
+        .depthCompareOp        = vk::CompareOp::eAlways,
         .depthBoundsTestEnable = vk::False,
         .stencilTestEnable     = vk::False
     };
@@ -122,11 +132,11 @@ void Pipeline::createPipelineDescriptorLayout( const vk::raii::Device& device, c
     pipelineLayout = vk::raii::PipelineLayout( device, pipelineLayoutInfo );
 }
 
-void Pipeline::createGraphicsPipeline( const LogicalDevice& device, const vk::raii::ShaderModule& shaderModule, const SwapChain& framebufferProperties, const vk::PipelineVertexInputStateCreateInfo& vertexInputInfo )
+void Pipeline::createGraphicsPipeline( const LogicalDevice& device, const vk::raii::ShaderModule& shaderModule, const SwapChain& framebufferProperties, vk::PrimitiveTopology topology, const vk::PipelineVertexInputStateCreateInfo& vertexInputInfo )
 {
     std::vector<vk::PipelineShaderStageCreateInfo> programmableModulesCreateInfo = createProgrammableModules( shaderModule );
 
-    vk::PipelineInputAssemblyStateCreateInfo inputAssemblyCreateInfo { .topology = vk::PrimitiveTopology::eTriangleList };
+    vk::PipelineInputAssemblyStateCreateInfo inputAssemblyCreateInfo { .topology = topology };
 
     vk::PipelineViewportStateCreateInfo viewportCreateInfo = createViewport( framebufferProperties.imageResolution );
     vk::PipelineRasterizationStateCreateInfo rasterizerCreateInfo = createRasterizer();
@@ -169,4 +179,20 @@ void Pipeline::createGraphicsPipeline( const LogicalDevice& device, const vk::ra
         std::cerr << "Error! The Pipeline's Descriptor Layout has NOT been defined!\n";
 
     pipeline = vk::raii::Pipeline( device.logicalDevice, nullptr, pipelineCreateInfo.get<vk::GraphicsPipelineCreateInfo>() );
+}
+
+
+void Pipeline::createComputePipeline( const vk::raii::Device& device, const vk::raii::ShaderModule& shaderModule )
+{
+    vk::PipelineShaderStageCreateInfo computeShaderStageInfo {
+        .stage = vk::ShaderStageFlagBits::eCompute,
+        .module = shaderModule,
+        .pName = "compMain" };
+
+    vk::ComputePipelineCreateInfo computePipelineCreateInfo {
+        .stage = computeShaderStageInfo,
+        .layout = pipelineLayout
+    };
+
+    pipeline = vk::raii::Pipeline( device, nullptr, computePipelineCreateInfo );
 }

@@ -34,25 +34,30 @@ struct RenderApplication
 
     vk::raii::DescriptorPool descriptorPool = nullptr;
     Descriptor descriptors;
-    Descriptor particleDescriptors;
+    Descriptor particleComputeDescriptors;
+    Descriptor particleGraphicDescriptors;
 
     std::vector<GPUBuffer> mvp_uboBuffers;
     std::vector<GPUBuffer> debug_uboBuffers;
     std::vector<GPUBuffer> particle_storageBuffers_currentFrame;
     std::vector<GPUBuffer> particle_storageBuffers_uboMule;
+    std::vector<GPUBuffer> particle_debugBuffers;
+    std::vector<GPUBuffer> particle_debugGraphicsBuffers;
 
     SwapChain swapChain;
     Image colourImage;
     Image depthImage;
 
     Pipeline graphicPipeline;
-    Pipeline particlePipeline;
+    Pipeline particleGraphicPipeline;
+    Pipeline particleComputePipeline;
 
     ModelData catModel;
 
     void setup();
     void createVertexGraphicsPipeline();
     void createParticleGraphicsPipeline();
+    void createParticleComputePipeline();
     void createCommandPools();
     void createDedicatedCommandBuffers();
     void createMVPUBOBuffers();
@@ -65,3 +70,5 @@ struct RenderApplication
     void createParticleDescriptors();
     void cleanup();
 };
+
+// TODO: Maybe move the functions to particle.cpp/vertex.hpp for their pipelines?

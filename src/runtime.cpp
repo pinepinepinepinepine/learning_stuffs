@@ -26,7 +26,6 @@ void RunTimeApplication::updateMVPUBOBuffer()
 	auto  currentTime = std::chrono::high_resolution_clock::now();
 	float time        = std::chrono::duration<float>(currentTime - startTime).count();
 
-
     mvpUBOBuffer mvpTransformationMatrix{};
 
     mvpTransformationMatrix.model = glm::rotate( glm::mat4(1.0f), time* glm::radians(160.0f), glm::vec3(0.0f, 1.0f, 0.0f) );
@@ -103,7 +102,80 @@ void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
 }
 
-void RunTimeApplication::recordParticleCommandBuffer( uint32_t currentImageIndex )
+
+void RunTimeApplication::updateParticleBuffer()
+{
+    ParticleTime particleTime;
+
+    particleTime.deltaTime = static_cast<float>(lastFrameTime) * 2.0f;
+
+    memcpy( app->particle_storageBuffers_uboMule[executingCommandBufferIndex].gpuBufferMapped, &particleTime, sizeof(particleTime) );
+}
+
+// Binding a pipeline is expensive, so the plan is: record the compute pipeline first, bind the same cmd buffer to compute, THEN we handle graphics afterwards.
+    // So, we can make a barrier but enforce it ONLY for the particlegraphic, since the cat model doesn't need anything.
+
+    // fuck prev frame, idea is: the currentFrame has the vertex data, and we need to finish writing to particlesOut before (in particle.slang)
+void RunTimeApplication::recordParticleComputeCommandBuffer( uint32_t currentImageIndex )
+{
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindPipeline( vk::PipelineBindPoint::eCompute, app->particleComputePipeline.pipeline );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindDescriptorSets(
+        vk::PipelineBindPoint::eCompute, app->particleComputePipeline.pipelineLayout, 0, *app->particleComputeDescriptors.descriptorSets[executingCommandBufferIndex], nullptr );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].dispatch( PARTICLE_COUNT / 256, 1, 1 );
+
+    vk::BufferMemoryBarrier2 computeBarrier_currentFrame {
+        .srcStageMask = vk::PipelineStageFlagBits2::eComputeShader,
+        .srcAccessMask = vk::AccessFlagBits2::eShaderWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eVertexShader,
+        .dstAccessMask = vk::AccessFlagBits2::eShaderRead,
+
+        .buffer = app->particle_storageBuffers_currentFrame[executingCommandBufferIndex].gpuBuffer,
+        .offset = 0,
+        .size = VK_WHOLE_SIZE };
+
+    std::vector<vk::BufferMemoryBarrier2> computeBarriers { computeBarrier_currentFrame };
+
+    vk::DependencyInfo dependencyInfo {
+        .dependencyFlags = {},
+        .bufferMemoryBarrierCount = static_cast<uint32_t>( computeBarriers.size() ),
+        .pBufferMemoryBarriers = computeBarriers.data() };
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].pipelineBarrier2( dependencyInfo ); // we MIGHT need 2 commandBuffers if we can't allow catModel commandBuffer to run until this is completed.
+
+    // graphics
+    vk::RenderingAttachmentInfo colourAttachmentInfo {
+        .imageView          = app->colourImage.imageView,
+        .imageLayout        = vk::ImageLayout::eColorAttachmentOptimal,
+        .resolveMode        = vk::ResolveModeFlagBits::eAverage,
+        .resolveImageView   = app->swapChain.swapChainImages[currentImageIndex].imageView,
+        .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+        .loadOp             = vk::AttachmentLoadOp::eLoad,
+        .storeOp            = vk::AttachmentStoreOp::eStore };
+
+    vk::RenderingAttachmentInfo depthAttachmentInfo {
+        .imageView          = app->depthImage.imageView,
+        .imageLayout        = vk::ImageLayout::eDepthAttachmentOptimal,
+        .loadOp             = vk::AttachmentLoadOp::eLoad,
+        .storeOp            = vk::AttachmentStoreOp::eStore };
+
+    vk::RenderingInfo renderingInfo {
+        .renderArea           = { .offset = { 0, 0 }, .extent = app->swapChain.imageResolution },
+        .layerCount           = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments    = &colourAttachmentInfo,
+        .pDepthAttachment     = &depthAttachmentInfo };
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].beginRendering( renderingInfo );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindPipeline( vk::PipelineBindPoint::eGraphics, app->particleGraphicPipeline.pipeline );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindVertexBuffers(
+       0, { app->particle_storageBuffers_currentFrame[executingCommandBufferIndex].gpuBuffer }, {0} );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindDescriptorSets(
+        vk::PipelineBindPoint::eGraphics, app->particleGraphicPipeline.pipelineLayout, 0, *app->particleGraphicDescriptors.descriptorSets[executingCommandBufferIndex], nullptr );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].draw(PARTICLE_COUNT, 1, 0, 0 );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
+}
+
+void RunTimeApplication::recordParticleGraphicsCommandBuffer( uint32_t currentImageIndex )
 {
     vk::RenderingAttachmentInfo colourAttachmentInfo {
         .imageView          = app->colourImage.imageView,
@@ -182,14 +254,19 @@ void RunTimeApplication::drawFrame()
     app->device.logicalDevice.resetFences( *drawFrameFence[executingCommandBufferIndex] );
 
     updateMVPUBOBuffer();
+    updateParticleBuffer();
 
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].begin({}); // .end() is located within presentToWindow
 
     recordCatCommandBuffer( imageIndex );
+    recordParticleComputeCommandBuffer( imageIndex );
 
     uint64_t graphicsWaitForValue = submissionTimelineSemaphoreValue;
     uint64_t graphicsFinishValue = ++submissionTimelineSemaphoreValue;
     presentToWindow( imageIndex, vk::PipelineStageFlagBits::eColorAttachmentOutput, graphicsWaitForValue, graphicsFinishValue );
+
+    glm::vec2* guh = static_cast<glm::vec2*>(app->particle_debugGraphicsBuffers[executingCommandBufferIndex].gpuBufferMapped);
+    std::cout << "Position: "<< guh->x << "x, " << guh->y << "y\n";
 }
 
 void RunTimeApplication::mainLoop()
@@ -198,6 +275,10 @@ void RunTimeApplication::mainLoop()
     {
         glfwPollEvents();
         drawFrame();
+
+        double currentTime = glfwGetTime();
+		lastFrameTime      = (currentTime - lastTime) * 1000.0;
+		lastTime           = currentTime;
     }
     app->device.logicalDevice.waitIdle();
 }
@@ -206,5 +287,6 @@ void RunTimeApplication::run()
 {
     createSynchronizationObjects();
 
+    lastTime = glfwGetTime();
     mainLoop();
 }

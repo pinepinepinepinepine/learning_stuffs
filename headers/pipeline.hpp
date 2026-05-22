@@ -26,6 +26,6 @@ class Pipeline
     vk::PipelineColorBlendStateCreateInfo createColorBlending( vk::PipelineColorBlendAttachmentState& colorAttachmentInfo );
     vk::PipelineRenderingCreateInfo createRendering( const vk::Format& colorFormat, const vk::Format& depthFormat );
     void createPipelineDescriptorLayout( const vk::raii::Device& device, const std::vector<vk::DescriptorSetLayout>& descriptorSetLayouts );
-    void createGraphicsPipeline( const LogicalDevice& device, const vk::raii::ShaderModule& shaderModule, const SwapChain& framebuffer, const vk::PipelineVertexInputStateCreateInfo& vertexInputInfo );
-
+    void createGraphicsPipeline( const LogicalDevice& device, const vk::raii::ShaderModule& shaderModule, const SwapChain& framebuffer, vk::PrimitiveTopology topology, const vk::PipelineVertexInputStateCreateInfo& vertexInputInfo );
+    void createComputePipeline( const vk::raii::Device& device, const vk::raii::ShaderModule& shaderModule );
 };

@@ -31,6 +31,7 @@ void RenderApplication::setup()
 
     createVertexGraphicsPipeline();
     createParticleGraphicsPipeline();
+    createParticleComputePipeline();
 }
 
 void RenderApplication::createVertexGraphicsPipeline()
@@ -46,13 +47,13 @@ void RenderApplication::createVertexGraphicsPipeline()
 
     vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/slang.spv" );
 
-    graphicPipeline.createGraphicsPipeline( device, shaderModules, swapChain, vertexInputInfo );
+    graphicPipeline.createGraphicsPipeline( device, shaderModules, swapChain, vk::PrimitiveTopology::eTriangleList, vertexInputInfo );
 }
 
 void RenderApplication::createParticleGraphicsPipeline()
 {
-    std::vector<vk::DescriptorSetLayout> vertexPipelineDescriptorSetLayouts { particleDescriptors.descriptorSetLayout };
-    particlePipeline.createPipelineDescriptorLayout( device.logicalDevice, vertexPipelineDescriptorSetLayouts );
+    std::vector<vk::DescriptorSetLayout> vertexPipelineDescriptorSetLayouts { particleGraphicDescriptors.descriptorSetLayout };
+    particleGraphicPipeline.createPipelineDescriptorLayout( device.logicalDevice, vertexPipelineDescriptorSetLayouts );
 
     auto bindingDescription    = Particle::getBindingDescription();
     auto attributeDescriptions = Particle::getAttributeDescriptions();
@@ -60,9 +61,19 @@ void RenderApplication::createParticleGraphicsPipeline()
         .vertexBindingDescriptionCount   = 1, .pVertexBindingDescriptions = &bindingDescription,
         .vertexAttributeDescriptionCount = static_cast<uint32_t>( attributeDescriptions.size() ), .pVertexAttributeDescriptions = attributeDescriptions.data() };
 
-    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/particle.spv" ); // todo: make this.
+    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/particle_graphics.spv" );
 
-    particlePipeline.createGraphicsPipeline( device, shaderModules, swapChain, vertexInputInfo );
+    particleGraphicPipeline.createGraphicsPipeline( device, shaderModules, swapChain, vk::PrimitiveTopology::ePointList, vertexInputInfo );
+}
+
+void RenderApplication::createParticleComputePipeline()
+{
+    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/particle_compute.spv" );
+
+    std::vector<vk::DescriptorSetLayout> computePipelineDescriptorSetLayouts { particleComputeDescriptors.descriptorSetLayout };
+    particleComputePipeline.createPipelineDescriptorLayout( device.logicalDevice, computePipelineDescriptorSetLayouts );
+
+    particleComputePipeline.createComputePipeline( device.logicalDevice, shaderModules );
 }
 
 void RenderApplication::createCommandPools()
@@ -112,10 +123,59 @@ void RenderApplication::createDebugBuffers()
 
         debug_uboBuffers.emplace_back( std::move(individualBuffer) );
     }
+
+    particle_debugBuffers.clear();
+    for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+    {
+        GPUBuffer individualBuffer;
+        individualBuffer.createGPUBuffer(
+            device,
+            sizeof(glm::vec2) * PARTICLE_COUNT,
+            vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            true );
+
+        particle_debugBuffers.emplace_back( std::move(individualBuffer) );
+    }
+
+    particle_debugGraphicsBuffers.clear();
+    for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+    {
+        GPUBuffer individualBuffer;
+        individualBuffer.createGPUBuffer(
+            device,
+            sizeof(glm::vec2) * PARTICLE_COUNT,
+            vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            true );
+
+        particle_debugGraphicsBuffers.emplace_back( std::move(individualBuffer) );
+    }
 }
 
 void RenderApplication::createParticleComputeBuffers()
 {
+    std::default_random_engine     rndEngine(static_cast<unsigned>(time(nullptr)));
+	std::uniform_real_distribution rndDist(0.0f, 1.0f);
+
+    // Initial particle positions on a circle
+	std::vector<Particle> particles(PARTICLE_COUNT);
+    for (auto &particle : particles)
+    {
+        float r           = 0.25f * sqrtf(rndDist(rndEngine));
+        float theta       = rndDist(rndEngine) * 2.0f * 3.14159265358979323846f;
+        float x           = r * cosf(theta) * HEIGHT / WIDTH;
+        float y           = r * sinf(theta);
+        particle.position = glm::vec2(x, y);
+        particle.velocity = normalize(glm::vec2(x, y)) * 0.00025f;
+        particle.color    = glm::vec4(rndDist(rndEngine), rndDist(rndEngine), rndDist(rndEngine), 1.0f);
+    }
+    GPUBuffer computeMule;
+    computeMule.createGPUBuffer( device, sizeof(Particle) * PARTICLE_COUNT, vk::BufferUsageFlagBits::eTransferSrc,
+    vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, true );
+	memcpy( computeMule.gpuBufferMapped, particles.data(), (size_t) (sizeof(Particle) * PARTICLE_COUNT));
+	computeMule.unmapGPUMemory();
+
     particle_storageBuffers_currentFrame.clear();
     particle_storageBuffers_uboMule.clear();
     for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
@@ -127,6 +187,7 @@ void RenderApplication::createParticleComputeBuffers()
             vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer, // Why vertexBuffer? figure out later.
             vk::MemoryPropertyFlagBits::eDeviceLocal,
             true );
+        individualStorageBuffer.copyBufferInto( computeMule.gpuBuffer, sizeof(Particle) * PARTICLE_COUNT );
         particle_storageBuffers_currentFrame.emplace_back( std::move(individualStorageBuffer) );
 
         GPUBuffer individualUBOBuffer;
@@ -189,9 +250,12 @@ void RenderApplication::createDescriptorPool()
     // Particles
     vk::DescriptorPoolSize particleStoragePoolSize( vk::DescriptorType::eStorageBuffer, MAX_FRAMES_IN_FLIGHT * 2 );
     vk::DescriptorPoolSize particleUBOPoolSize( vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT );
+    vk::DescriptorPoolSize particleDebugPoolSize( vk::DescriptorType::eStorageBuffer, MAX_FRAMES_IN_FLIGHT );
+    // Particles Graphics
+    vk::DescriptorPoolSize particleGraphicsDebugPoolSize( vk::DescriptorType::eStorageBuffer, MAX_FRAMES_IN_FLIGHT );
 
-    std::vector<vk::DescriptorPoolSize> poolSize { uboPoolSize, samplerPoolSize, debugUBOPoolSize, particleStoragePoolSize, particleUBOPoolSize };
-    descriptorPool = DescriptorPool::createDescriptorPool( device.logicalDevice, poolSize, MAX_FRAMES_IN_FLIGHT * 2 ); // *2 because of models + particles, a distinct set per. check if right.
+    std::vector<vk::DescriptorPoolSize> poolSize { uboPoolSize, samplerPoolSize, debugUBOPoolSize, particleStoragePoolSize, particleUBOPoolSize, particleDebugPoolSize, particleGraphicsDebugPoolSize };
+    descriptorPool = DescriptorPool::createDescriptorPool( device.logicalDevice, poolSize, MAX_FRAMES_IN_FLIGHT * 3 ); // *2 because of models + particles, a distinct set per. check if right.
 }
 
 void RenderApplication::createModelDescriptors()
@@ -231,7 +295,7 @@ void RenderApplication::createModelDescriptors()
 
 void RenderApplication::createParticleDescriptors()
 {
-    particleDescriptors.setDescriptorsPool( descriptorPool );
+    particleComputeDescriptors.setDescriptorsPool( descriptorPool );
 
     vk::DescriptorSetLayoutBinding particleStorageLayoutBinding_previousFrame(
         0,
@@ -251,16 +315,38 @@ void RenderApplication::createParticleDescriptors()
         1,
         vk::ShaderStageFlagBits::eCompute,
         nullptr );
-    std::vector<vk::DescriptorSetLayoutBinding> layoutBindings { particleStorageLayoutBinding_previousFrame, particleStorageLayoutBinding_currentFrame, particleStorageLayoutBinding_uboMule };
-    particleDescriptors.createDescriptorSetLayout( device.logicalDevice, layoutBindings );
+    vk::DescriptorSetLayoutBinding particleStorageLayoutBinding_debug(
+        3,
+        vk::DescriptorType::eStorageBuffer,
+        1,
+        vk::ShaderStageFlagBits::eCompute,
+        nullptr );
+    std::vector<vk::DescriptorSetLayoutBinding> layoutBindings { particleStorageLayoutBinding_previousFrame, particleStorageLayoutBinding_currentFrame, particleStorageLayoutBinding_uboMule, particleStorageLayoutBinding_debug };
+    particleComputeDescriptors.createDescriptorSetLayout( device.logicalDevice, layoutBindings );
 
-    particleDescriptors.createEmptyDescriptorSets( device.logicalDevice, MAX_FRAMES_IN_FLIGHT );
+    particleComputeDescriptors.createEmptyDescriptorSets( device.logicalDevice, MAX_FRAMES_IN_FLIGHT );
 
     for ( int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
     {
-        particleDescriptors.setBufferResource( device.logicalDevice, particle_storageBuffers_currentFrame[(i + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Particle) * PARTICLE_COUNT, i, 0 ); // TODO: fix the name, it's a general purpose setResource, not UBO exclusive.
-        particleDescriptors.setBufferResource( device.logicalDevice, particle_storageBuffers_currentFrame[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Particle) * PARTICLE_COUNT, i, 1 );
-        particleDescriptors.setBufferResource( device.logicalDevice, particle_storageBuffers_uboMule[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(ParticleTime), i, 2 );
+        particleComputeDescriptors.setBufferResource( device.logicalDevice, particle_storageBuffers_currentFrame[(i + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Particle) * PARTICLE_COUNT, i, 0 ); // TODO: fix the name, it's a general purpose setResource, not UBO exclusive.
+        particleComputeDescriptors.setBufferResource( device.logicalDevice, particle_storageBuffers_currentFrame[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Particle) * PARTICLE_COUNT, i, 1 );
+        particleComputeDescriptors.setBufferResource( device.logicalDevice, particle_storageBuffers_uboMule[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(ParticleTime), i, 2 );
+        particleComputeDescriptors.setBufferResource( device.logicalDevice, particle_debugBuffers[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(glm::vec2) * PARTICLE_COUNT, i, 3 );
+    }
+
+    particleGraphicDescriptors.setDescriptorsPool( descriptorPool );
+    vk::DescriptorSetLayoutBinding particleStorageLayoutBinding_debugGraphics(
+        0,
+        vk::DescriptorType::eStorageBuffer,
+        1,
+        vk::ShaderStageFlagBits::eVertex,
+        nullptr );
+    std::vector<vk::DescriptorSetLayoutBinding> graphicsLayoutBindings {particleStorageLayoutBinding_debugGraphics};
+    particleGraphicDescriptors.createDescriptorSetLayout( device.logicalDevice, graphicsLayoutBindings );
+    particleGraphicDescriptors.createEmptyDescriptorSets( device.logicalDevice, MAX_FRAMES_IN_FLIGHT );
+    for ( int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+    {
+        particleGraphicDescriptors.setBufferResource( device.logicalDevice, particle_debugGraphicsBuffers[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(glm::vec2) * PARTICLE_COUNT, i, 0 );
     }
 }
 
