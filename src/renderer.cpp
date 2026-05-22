@@ -10,7 +10,7 @@ void RenderApplication::setup()
     device.createLogicalDevice( &window.window_surface );
 
     createCommandPools();
-    createDedicatedCommandBuffers();
+    cmdBuffers.createCommandBuffers( device.logicalDevice, MAX_FRAMES_IN_FLIGHT ); // Dedicated Command Buffers
 
     swapChain.createSwapChain( device, window );
     createAttachmentImages();
@@ -22,8 +22,8 @@ void RenderApplication::setup()
     catModel.loadModel( device, "../models/spin.obj" );
 
     createMVPUBOBuffers();
-    createDebugBuffers();
     createParticleComputeBuffers();
+    createDebugBuffers();
 
     createDescriptorPool();
     createModelDescriptors();
@@ -34,46 +34,55 @@ void RenderApplication::setup()
     createParticleComputePipeline();
 }
 
-void RenderApplication::createVertexGraphicsPipeline()
+void RenderApplication::cleanup()
 {
-    std::vector<vk::DescriptorSetLayout> vertexPipelineDescriptorSetLayouts { descriptors.descriptorSetLayout };
-    graphicPipeline.createPipelineDescriptorLayout( device.logicalDevice, vertexPipelineDescriptorSetLayouts );
+    swapChain.cleanupSwapChainViews(); // Raii EXPLICITLY wants to delete the swap chain images itself.
+    catTexture.textureImage.cleanupImage( device.logicalDevice );
+    colourImage.cleanupImage( device.logicalDevice );
+    depthImage.cleanupImage( device.logicalDevice );
 
-    auto bindingDescription    = Vertex::getBindingDescription();
-    auto attributeDescriptions = Vertex::getAttributeDescriptions();
-    vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
-        .vertexBindingDescriptionCount   = 1, .pVertexBindingDescriptions = &bindingDescription,
-        .vertexAttributeDescriptionCount = static_cast<uint32_t>( attributeDescriptions.size() ), .pVertexAttributeDescriptions = attributeDescriptions.data() };
-
-    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/slang.spv" );
-
-    graphicPipeline.createGraphicsPipeline( device, shaderModules, swapChain, vk::PrimitiveTopology::eTriangleList, vertexInputInfo );
+    vkDestroySurfaceKHR( *device.instance, window.window_surface, nullptr );
+    glfwDestroyWindow( window.window );
+    glfwTerminate();
 }
 
-void RenderApplication::createParticleGraphicsPipeline()
+void RenderApplication::createAttachmentImages()
 {
-    std::vector<vk::DescriptorSetLayout> vertexPipelineDescriptorSetLayouts { particleGraphicDescriptors.descriptorSetLayout };
-    particleGraphicPipeline.createPipelineDescriptorLayout( device.logicalDevice, vertexPipelineDescriptorSetLayouts );
+    colourImage.createImage( device, swapChain.imageResolution.width, swapChain.imageResolution.height,
+        1, device.msaaSamples, swapChain.surfaceFormat.format, vk::ImageTiling::eOptimal,
+        vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransientAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageAspectFlagBits::eColor );
 
-    auto bindingDescription    = Particle::getBindingDescription();
-    auto attributeDescriptions = Particle::getAttributeDescriptions();
-    vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
-        .vertexBindingDescriptionCount   = 1, .pVertexBindingDescriptions = &bindingDescription,
-        .vertexAttributeDescriptionCount = static_cast<uint32_t>( attributeDescriptions.size() ), .pVertexAttributeDescriptions = attributeDescriptions.data() };
-
-    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/particle_graphics.spv" );
-
-    particleGraphicPipeline.createGraphicsPipeline( device, shaderModules, swapChain, vk::PrimitiveTopology::ePointList, vertexInputInfo );
+    vk::Format depthFormat = device.findSupportedFormat( // Maybe make this into a member? We re-use this, but it's not important or anything -- memory too...
+        { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint },
+        vk::ImageTiling::eOptimal, vk::FormatFeatureFlagBits::eDepthStencilAttachment );
+    depthImage.createImage(
+        device, swapChain.imageResolution.width, swapChain.imageResolution.height,
+        1, device.msaaSamples, depthFormat, vk::ImageTiling::eOptimal,
+        vk::ImageUsageFlagBits::eDepthStencilAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageAspectFlagBits::eDepth ); // TODO: Should DepthImage also be eTransientAttachment?
 }
 
-void RenderApplication::createParticleComputePipeline()
+vk::raii::Sampler RenderApplication::createTextureSampler()
 {
-    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/particle_compute.spv" );
+    vk::PhysicalDeviceProperties properties = device.physicalDevice.getProperties();
 
-    std::vector<vk::DescriptorSetLayout> computePipelineDescriptorSetLayouts { particleComputeDescriptors.descriptorSetLayout };
-    particleComputePipeline.createPipelineDescriptorLayout( device.logicalDevice, computePipelineDescriptorSetLayouts );
+    vk::SamplerCreateInfo samplerInfo {
+        .magFilter = vk::Filter::eLinear,
+        .minFilter = vk::Filter::eLinear,
+        .addressModeU = vk::SamplerAddressMode::eRepeat,
+        .addressModeV = vk::SamplerAddressMode::eRepeat,
+        .addressModeW = vk::SamplerAddressMode::eRepeat,
+        .anisotropyEnable = vk::True,
+        .maxAnisotropy = properties.limits.maxSamplerAnisotropy,
+        .compareEnable = vk::False,
+        .compareOp = vk::CompareOp::eAlways,
+        .borderColor = vk::BorderColor::eIntOpaqueBlack,
+        .unnormalizedCoordinates = vk::False };
+    samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
+    samplerInfo.mipLodBias = 0.0f;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = vk::LodClampNone;
 
-    particleComputePipeline.createComputePipeline( device.logicalDevice, shaderModules );
+    return vk::raii::Sampler( device.logicalDevice, samplerInfo );
 }
 
 void RenderApplication::createCommandPools()
@@ -81,14 +90,8 @@ void RenderApplication::createCommandPools()
     dedicatedCommandPool = CommandPool::createCommandPool( device.logicalDevice, device.queueIndex, vk::CommandPoolCreateFlagBits::eResetCommandBuffer );
     transientCommandPool = CommandPool::createCommandPool( device.logicalDevice, device.queueIndex,
         vk::CommandPoolCreateFlagBits::eResetCommandBuffer | vk::CommandPoolCreateFlagBits::eTransient );
-
     TransientCommandBuffer::initialize( transientCommandPool, device.logicalDevice, device.queue );
     DedicatedCommandBuffers::initialize( dedicatedCommandPool );
-}
-
-void RenderApplication::createDedicatedCommandBuffers()
-{
-    cmdBuffers.createCommandBuffers( device.logicalDevice, MAX_FRAMES_IN_FLIGHT );
 }
 
 void RenderApplication::createMVPUBOBuffers()
@@ -103,53 +106,7 @@ void RenderApplication::createMVPUBOBuffers()
             vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent, // TODO: make this device local probs. mule the data over.
             true );
-
         mvp_uboBuffers.emplace_back( std::move(individualBuffer) );
-    }
-}
-
-void RenderApplication::createDebugBuffers()
-{
-    debug_uboBuffers.clear();
-    for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
-    {
-        GPUBuffer individualBuffer;
-        individualBuffer.createGPUBuffer(
-            device,
-            sizeof(Vertex) * catModel.vertices_count,
-            vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-            true );
-
-        debug_uboBuffers.emplace_back( std::move(individualBuffer) );
-    }
-
-    particle_debugBuffers.clear();
-    for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
-    {
-        GPUBuffer individualBuffer;
-        individualBuffer.createGPUBuffer(
-            device,
-            sizeof(glm::vec2) * PARTICLE_COUNT,
-            vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-            true );
-
-        particle_debugBuffers.emplace_back( std::move(individualBuffer) );
-    }
-
-    particle_debugGraphicsBuffers.clear();
-    for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
-    {
-        GPUBuffer individualBuffer;
-        individualBuffer.createGPUBuffer(
-            device,
-            sizeof(glm::vec2) * PARTICLE_COUNT,
-            vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
-            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
-            true );
-
-        particle_debugGraphicsBuffers.emplace_back( std::move(individualBuffer) );
     }
 }
 
@@ -201,43 +158,46 @@ void RenderApplication::createParticleComputeBuffers()
     }
 }
 
-vk::raii::Sampler RenderApplication::createTextureSampler()
+void RenderApplication::createDebugBuffers()
 {
-    vk::PhysicalDeviceProperties properties = device.physicalDevice.getProperties();
+    debug_uboBuffers.clear();
+    for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+    {
+        GPUBuffer individualBuffer;
+        individualBuffer.createGPUBuffer(
+            device,
+            sizeof(Vertex) * catModel.vertices_count,
+            vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            true );
+        debug_uboBuffers.emplace_back( std::move(individualBuffer) );
+    }
 
-    vk::SamplerCreateInfo samplerInfo {
-        .magFilter = vk::Filter::eLinear,
-        .minFilter = vk::Filter::eLinear,
-        .addressModeU = vk::SamplerAddressMode::eRepeat,
-        .addressModeV = vk::SamplerAddressMode::eRepeat,
-        .addressModeW = vk::SamplerAddressMode::eRepeat,
-        .anisotropyEnable = vk::True,
-        .maxAnisotropy = properties.limits.maxSamplerAnisotropy,
-        .compareEnable = vk::False,
-        .compareOp = vk::CompareOp::eAlways,
-        .borderColor = vk::BorderColor::eIntOpaqueBlack,
-        .unnormalizedCoordinates = vk::False };
-    samplerInfo.mipmapMode = vk::SamplerMipmapMode::eLinear;
-    samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = vk::LodClampNone;
+    particle_debugComputeBuffers.clear();
+    for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+    {
+        GPUBuffer individualBuffer;
+        individualBuffer.createGPUBuffer(
+            device,
+            sizeof(glm::vec2) * PARTICLE_COUNT,
+            vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            true );
+        particle_debugComputeBuffers.emplace_back( std::move(individualBuffer) );
+    }
 
-    return vk::raii::Sampler( device.logicalDevice, samplerInfo );
-}
-
-void RenderApplication::createAttachmentImages()
-{
-    colourImage.createImage( device, swapChain.imageResolution.width, swapChain.imageResolution.height,
-        1, device.msaaSamples, swapChain.surfaceFormat.format, vk::ImageTiling::eOptimal,
-        vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransientAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageAspectFlagBits::eColor );
-
-    vk::Format depthFormat = device.findSupportedFormat( // Maybe make this into a member? We re-use this, but it's not important or anything -- memory too...
-        { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint },
-        vk::ImageTiling::eOptimal, vk::FormatFeatureFlagBits::eDepthStencilAttachment );
-    depthImage.createImage(
-        device, swapChain.imageResolution.width, swapChain.imageResolution.height,
-        1, device.msaaSamples, depthFormat, vk::ImageTiling::eOptimal,
-        vk::ImageUsageFlagBits::eDepthStencilAttachment, vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageAspectFlagBits::eDepth ); // TODO: Should DepthImage also be eTransientAttachment?
+    particle_debugGraphicsBuffers.clear();
+    for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+    {
+        GPUBuffer individualBuffer;
+        individualBuffer.createGPUBuffer(
+            device,
+            sizeof(glm::vec2) * PARTICLE_COUNT,
+            vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            true );
+        particle_debugGraphicsBuffers.emplace_back( std::move(individualBuffer) );
+    }
 }
 
 void RenderApplication::createDescriptorPool()
@@ -331,7 +291,7 @@ void RenderApplication::createParticleDescriptors()
         particleComputeDescriptors.setBufferResource( device.logicalDevice, particle_storageBuffers_currentFrame[(i + MAX_FRAMES_IN_FLIGHT - 1) % MAX_FRAMES_IN_FLIGHT].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Particle) * PARTICLE_COUNT, i, 0 ); // TODO: fix the name, it's a general purpose setResource, not UBO exclusive.
         particleComputeDescriptors.setBufferResource( device.logicalDevice, particle_storageBuffers_currentFrame[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Particle) * PARTICLE_COUNT, i, 1 );
         particleComputeDescriptors.setBufferResource( device.logicalDevice, particle_storageBuffers_uboMule[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(ParticleTime), i, 2 );
-        particleComputeDescriptors.setBufferResource( device.logicalDevice, particle_debugBuffers[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(glm::vec2) * PARTICLE_COUNT, i, 3 );
+        particleComputeDescriptors.setBufferResource( device.logicalDevice, particle_debugComputeBuffers[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(glm::vec2) * PARTICLE_COUNT, i, 3 );
     }
 
     particleGraphicDescriptors.setDescriptorsPool( descriptorPool );
@@ -350,14 +310,46 @@ void RenderApplication::createParticleDescriptors()
     }
 }
 
-void RenderApplication::cleanup()
-{
-    swapChain.cleanupSwapChainViews(); // Raii EXPLICITLY wants to delete the swap chain images itself.
-    catTexture.textureImage.cleanupImage( device.logicalDevice );
-    colourImage.cleanupImage( device.logicalDevice );
-    depthImage.cleanupImage( device.logicalDevice );
 
-    vkDestroySurfaceKHR( *device.instance, window.window_surface, nullptr );
-    glfwDestroyWindow( window.window );
-    glfwTerminate();
+
+void RenderApplication::createVertexGraphicsPipeline()
+{
+    std::vector<vk::DescriptorSetLayout> vertexPipelineDescriptorSetLayouts { descriptors.descriptorSetLayout };
+    graphicPipeline.createPipelineDescriptorLayout( device.logicalDevice, vertexPipelineDescriptorSetLayouts );
+
+    auto bindingDescription    = Vertex::getBindingDescription();
+    auto attributeDescriptions = Vertex::getAttributeDescriptions();
+    vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
+        .vertexBindingDescriptionCount   = 1, .pVertexBindingDescriptions = &bindingDescription,
+        .vertexAttributeDescriptionCount = static_cast<uint32_t>( attributeDescriptions.size() ), .pVertexAttributeDescriptions = attributeDescriptions.data() };
+
+    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/slang.spv" );
+
+    graphicPipeline.createGraphicsPipeline( device, shaderModules, swapChain, vk::PrimitiveTopology::eTriangleList, vertexInputInfo );
+}
+
+void RenderApplication::createParticleGraphicsPipeline()
+{
+    std::vector<vk::DescriptorSetLayout> vertexPipelineDescriptorSetLayouts { particleGraphicDescriptors.descriptorSetLayout };
+    particleGraphicPipeline.createPipelineDescriptorLayout( device.logicalDevice, vertexPipelineDescriptorSetLayouts );
+
+    auto bindingDescription    = Particle::getBindingDescription();
+    auto attributeDescriptions = Particle::getAttributeDescriptions();
+    vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
+        .vertexBindingDescriptionCount   = 1, .pVertexBindingDescriptions = &bindingDescription,
+        .vertexAttributeDescriptionCount = static_cast<uint32_t>( attributeDescriptions.size() ), .pVertexAttributeDescriptions = attributeDescriptions.data() };
+
+    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/particle_graphics.spv" );
+
+    particleGraphicPipeline.createGraphicsPipeline( device, shaderModules, swapChain, vk::PrimitiveTopology::ePointList, vertexInputInfo );
+}
+
+void RenderApplication::createParticleComputePipeline()
+{
+    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/particle_compute.spv" );
+
+    std::vector<vk::DescriptorSetLayout> computePipelineDescriptorSetLayouts { particleComputeDescriptors.descriptorSetLayout };
+    particleComputePipeline.createPipelineDescriptorLayout( device.logicalDevice, computePipelineDescriptorSetLayouts );
+
+    particleComputePipeline.createComputePipeline( device.logicalDevice, shaderModules );
 }

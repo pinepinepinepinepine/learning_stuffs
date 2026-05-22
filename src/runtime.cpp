@@ -102,21 +102,14 @@ void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
 }
 
-
 void RunTimeApplication::updateParticleBuffer()
 {
     ParticleTime particleTime;
-
     particleTime.deltaTime = static_cast<float>(lastFrameTime) * 2.0f;
-
     memcpy( app->particle_storageBuffers_uboMule[executingCommandBufferIndex].gpuBufferMapped, &particleTime, sizeof(particleTime) );
 }
 
-// Binding a pipeline is expensive, so the plan is: record the compute pipeline first, bind the same cmd buffer to compute, THEN we handle graphics afterwards.
-    // So, we can make a barrier but enforce it ONLY for the particlegraphic, since the cat model doesn't need anything.
-
-    // fuck prev frame, idea is: the currentFrame has the vertex data, and we need to finish writing to particlesOut before (in particle.slang)
-void RunTimeApplication::recordParticleComputeCommandBuffer( uint32_t currentImageIndex )
+void RunTimeApplication::recordParticleCommandBuffer( uint32_t currentImageIndex )
 {
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindPipeline( vk::PipelineBindPoint::eCompute, app->particleComputePipeline.pipeline );
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindDescriptorSets(
@@ -142,7 +135,7 @@ void RunTimeApplication::recordParticleComputeCommandBuffer( uint32_t currentIma
 
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].pipelineBarrier2( dependencyInfo ); // we MIGHT need 2 commandBuffers if we can't allow catModel commandBuffer to run until this is completed.
 
-    // graphics
+        // Graphic Stuff
     vk::RenderingAttachmentInfo colourAttachmentInfo {
         .imageView          = app->colourImage.imageView,
         .imageLayout        = vk::ImageLayout::eColorAttachmentOptimal,
@@ -174,33 +167,6 @@ void RunTimeApplication::recordParticleComputeCommandBuffer( uint32_t currentIma
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].draw(PARTICLE_COUNT, 1, 0, 0 );
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
 }
-
-void RunTimeApplication::recordParticleGraphicsCommandBuffer( uint32_t currentImageIndex )
-{
-    vk::RenderingAttachmentInfo colourAttachmentInfo {
-        .imageView          = app->colourImage.imageView,
-        .imageLayout        = vk::ImageLayout::eColorAttachmentOptimal,
-        .resolveMode        = vk::ResolveModeFlagBits::eAverage,
-        .resolveImageView   = app->swapChain.swapChainImages[currentImageIndex].imageView,
-        .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-        .loadOp             = vk::AttachmentLoadOp::eLoad,
-        .storeOp            = vk::AttachmentStoreOp::eStore };
-
-    vk::RenderingAttachmentInfo depthAttachmentInfo {
-        .imageView          = app->depthImage.imageView,
-        .imageLayout        = vk::ImageLayout::eDepthAttachmentOptimal,
-        .loadOp             = vk::AttachmentLoadOp::eLoad,
-        .storeOp            = vk::AttachmentStoreOp::eStore };
-
-    vk::RenderingInfo renderingInfo {
-        .renderArea           = { .offset = { 0, 0 }, .extent = app->swapChain.imageResolution },
-        .layerCount           = 1,
-        .colorAttachmentCount = 1,
-        .pColorAttachments    = &colourAttachmentInfo,
-        .pDepthAttachment     = &depthAttachmentInfo };
-
-}
-
 
 void RunTimeApplication::presentToWindow( uint32_t currentImageIndex, vk::PipelineStageFlags pipelineWaitStage, uint64_t waitForValue, uint64_t signalValue )
 {
@@ -259,14 +225,11 @@ void RunTimeApplication::drawFrame()
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].begin({}); // .end() is located within presentToWindow
 
     recordCatCommandBuffer( imageIndex );
-    recordParticleComputeCommandBuffer( imageIndex );
+    recordParticleCommandBuffer( imageIndex );
 
     uint64_t graphicsWaitForValue = submissionTimelineSemaphoreValue;
     uint64_t graphicsFinishValue = ++submissionTimelineSemaphoreValue;
     presentToWindow( imageIndex, vk::PipelineStageFlagBits::eColorAttachmentOutput, graphicsWaitForValue, graphicsFinishValue );
-
-    glm::vec2* guh = static_cast<glm::vec2*>(app->particle_debugGraphicsBuffers[executingCommandBufferIndex].gpuBufferMapped);
-    std::cout << "Position: "<< guh->x << "x, " << guh->y << "y\n";
 }
 
 void RunTimeApplication::mainLoop()

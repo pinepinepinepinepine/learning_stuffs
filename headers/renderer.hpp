@@ -41,7 +41,7 @@ struct RenderApplication
     std::vector<GPUBuffer> debug_uboBuffers;
     std::vector<GPUBuffer> particle_storageBuffers_currentFrame;
     std::vector<GPUBuffer> particle_storageBuffers_uboMule;
-    std::vector<GPUBuffer> particle_debugBuffers;
+    std::vector<GPUBuffer> particle_debugComputeBuffers;
     std::vector<GPUBuffer> particle_debugGraphicsBuffers;
 
     SwapChain swapChain;
@@ -59,7 +59,6 @@ struct RenderApplication
     void createParticleGraphicsPipeline();
     void createParticleComputePipeline();
     void createCommandPools();
-    void createDedicatedCommandBuffers();
     void createMVPUBOBuffers();
     void createDebugBuffers();
     void createParticleComputeBuffers();
