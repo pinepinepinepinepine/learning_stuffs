@@ -1,0 +1,17 @@
+<AtomicObject>.store(<SomeArbitraryValue>, std::memory_order_release);
+
+.store is equivalent to operator=, but it's ATOMIC. Atomic just bundles operations instead of segmenting them to avoid race conditions of one thread writing to X while another thread is reading X -- it JUST avoids race conditions between threads.
+
+The first parameter is what value to set to that atomic object, and the other parameter is the ORDER.
+    the ORDER is similar to pipeline barriers with the GPU, but they're for the compiler now! They're pretty similar.
+
+std::memory_order_release ENSURES (acts as a barrier) that the compiler doesn't move the line of instructions (lines of instructions being your code) from BEFORE the .store call to occur AFTER the .store call
+    NO read or write operations that occur BEFORE the .store call can be reordered to occur AFTER the .store call -- this protects the PAST.
+
+std::memory_order_acquire is the same thing BUT inverted to memory_order_release.
+std::memory_order_acquire ENSURES that the compiler doesn't move the line of instructions from AFTER the .load call to occur BEFORE the .load call.
+    NO read or write operations that occur AFTER the .load call can be reordered to occur BEFORE the .load call -- this protects the FUTURE.
+
+For .store(): the reason you'd do this is because you don't want to .store a wrongful value because the compiler loads it wrong;
+For .load(): you'd do this because you don't want to read a wrongful value because the compiler loads it wrong due to jumbling up your code where you don't want it.
+    (you can't use _acquire on .store as it's undefined, and you can't use _release on .load() as it's also undefined)
