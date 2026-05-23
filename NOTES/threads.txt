@@ -39,3 +39,15 @@ However, in order to even have the thread be able to check whether that lambda f
     Thread B can now grab the lock and actually continue executing, first checking the lambda.
     Thread B executes whatever because its lambda is true -- it won't be put to sleep because the lambda returns TRUE, allowing it to proceed.
         Of course, if the lambda returns FALSE, thread B doesn't execute and goes back to bed.
+
+
+A fence is similar to the order of .store/.load: it ensures leakage doesn't go before or after the call:
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+        They are pretty similar to .load/.store, but without any operation to read or write to some object.
+
+A fence just ensures that "no code from AFTER this fence can occur BEFORE this fence, and no code from BEFORE this fence can go into AFTER"
+    The order similarily defines what specifically can't pass where.
+    std::memory_order_seq_cst is the strictest: it means code cannot move PAST or BEFORE it either way -- it ensures the code executes in a sequentially consistent (hence the name) order.
+
+As a heads up, these order/fences are CODE GLOBAL, they are NOT restricted by the function or scope, so, ALL code that executes BEFORE the fence has to execute BEFORE, while the same but for AFTER -- it is GLOBAL.
+    This includes .load and .store's order -- these orderings affect EVERYTHING.

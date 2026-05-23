@@ -25,7 +25,7 @@ class Pipeline
     vk::PipelineDepthStencilStateCreateInfo createDepthStencil();
     vk::PipelineColorBlendStateCreateInfo createColorBlending( vk::PipelineColorBlendAttachmentState& colorAttachmentInfo );
     vk::PipelineRenderingCreateInfo createRendering( const vk::Format& colorFormat, const vk::Format& depthFormat );
-    void createPipelineDescriptorLayout( const vk::raii::Device& device, const std::vector<vk::DescriptorSetLayout>& descriptorSetLayouts );
+    void createPipelineDescriptorLayout( const vk::raii::Device& device, const std::vector<vk::DescriptorSetLayout>& descriptorSetLayouts, const std::vector<vk::PushConstantRange>& pushConstants );
     void createGraphicsPipeline( const LogicalDevice& device, const vk::raii::ShaderModule& shaderModule, const SwapChain& framebuffer, vk::PrimitiveTopology topology, const vk::PipelineVertexInputStateCreateInfo& vertexInputInfo );
     void createComputePipeline( const vk::raii::Device& device, const vk::raii::ShaderModule& shaderModule );
 };

@@ -116,18 +116,13 @@ vk::PipelineRenderingCreateInfo Pipeline::createRendering( const vk::Format& col
     return renderingPipelineCreateInfo;
 }
 
-void Pipeline::createPipelineDescriptorLayout( const vk::raii::Device& device, const std::vector<vk::DescriptorSetLayout>& descriptorSetLayouts )
+void Pipeline::createPipelineDescriptorLayout( const vk::raii::Device& device, const std::vector<vk::DescriptorSetLayout>& descriptorSetLayouts, const std::vector<vk::PushConstantRange>& pushConstants )
 {
-    if ( descriptorSetLayouts.empty() ) // we can probably remove this.
-    {
-        pipelineLayout = vk::raii::PipelineLayout( device, { .setLayoutCount = 0, .pushConstantRangeCount = 0 } );
-        return;
-    }
-
     vk::PipelineLayoutCreateInfo pipelineLayoutInfo {
         .setLayoutCount = static_cast<uint32_t>(descriptorSetLayouts.size()),
         .pSetLayouts = descriptorSetLayouts.data(),
-        .pushConstantRangeCount = 0 };
+        .pushConstantRangeCount = static_cast<uint32_t>(pushConstants.size()),
+        .pPushConstantRanges = pushConstants.data() };
 
     pipelineLayout = vk::raii::PipelineLayout( device, pipelineLayoutInfo );
 }

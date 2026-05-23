@@ -32,10 +32,14 @@ void RenderApplication::setup()
     createVertexGraphicsPipeline();
     createParticleGraphicsPipeline();
     createParticleComputePipeline();
+
+    createThreads();
 }
 
 void RenderApplication::cleanup()
 {
+    threadManager.stopThreads();
+
     swapChain.cleanupSwapChainViews(); // Raii EXPLICITLY wants to delete the swap chain images itself.
     catTexture.textureImage.cleanupImage( device.logicalDevice );
     colourImage.cleanupImage( device.logicalDevice );
@@ -315,7 +319,8 @@ void RenderApplication::createParticleDescriptors()
 void RenderApplication::createVertexGraphicsPipeline()
 {
     std::vector<vk::DescriptorSetLayout> vertexPipelineDescriptorSetLayouts { descriptors.descriptorSetLayout };
-    graphicPipeline.createPipelineDescriptorLayout( device.logicalDevice, vertexPipelineDescriptorSetLayouts );
+    std::vector<vk::PushConstantRange> vertexPushConstants{};
+    graphicPipeline.createPipelineDescriptorLayout( device.logicalDevice, vertexPipelineDescriptorSetLayouts, vertexPushConstants );
 
     auto bindingDescription    = Vertex::getBindingDescription();
     auto attributeDescriptions = Vertex::getAttributeDescriptions();
@@ -331,7 +336,8 @@ void RenderApplication::createVertexGraphicsPipeline()
 void RenderApplication::createParticleGraphicsPipeline()
 {
     std::vector<vk::DescriptorSetLayout> vertexPipelineDescriptorSetLayouts { particleGraphicDescriptors.descriptorSetLayout };
-    particleGraphicPipeline.createPipelineDescriptorLayout( device.logicalDevice, vertexPipelineDescriptorSetLayouts );
+    std::vector<vk::PushConstantRange> particleGraphicsPushConstants{};
+    particleGraphicPipeline.createPipelineDescriptorLayout( device.logicalDevice, vertexPipelineDescriptorSetLayouts, particleGraphicsPushConstants );
 
     auto bindingDescription    = Particle::getBindingDescription();
     auto attributeDescriptions = Particle::getAttributeDescriptions();
@@ -341,15 +347,34 @@ void RenderApplication::createParticleGraphicsPipeline()
 
     vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/particle_graphics.spv" );
 
-    particleGraphicPipeline.createGraphicsPipeline( device, shaderModules, swapChain, vk::PrimitiveTopology::ePointList, vertexInputInfo );
+    particleGraphicPipeline.createGraphicsPipeline( device, shaderModules, swapChain, vk::PrimitiveTopology::eTriangleList, vertexInputInfo );
 }
 
 void RenderApplication::createParticleComputePipeline()
 {
-    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/particle_compute.spv" );
-
     std::vector<vk::DescriptorSetLayout> computePipelineDescriptorSetLayouts { particleComputeDescriptors.descriptorSetLayout };
-    particleComputePipeline.createPipelineDescriptorLayout( device.logicalDevice, computePipelineDescriptorSetLayouts );
 
+    vk::PushConstantRange pushConstantRange {
+		.stageFlags = vk::ShaderStageFlagBits::eCompute,
+		.offset     = 0,
+		.size       = sizeof(uint32_t) * 2 }; // struct PushConstants: startIndex and count
+
+    std::vector<vk::PushConstantRange> particleComputePushConstants{ pushConstantRange };
+    particleComputePipeline.createPipelineDescriptorLayout( device.logicalDevice, computePipelineDescriptorSetLayouts, particleComputePushConstants );
+
+    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/particle_compute.spv" );
     particleComputePipeline.createComputePipeline( device.logicalDevice, shaderModules );
+}
+
+
+
+void RenderApplication::createThreads()
+{
+    threadManager.createThreadCommandPools( device.logicalDevice, device.queueIndex, THREAD_COUNT );
+    threadManager.allocateCommandBuffers( device.logicalDevice, THREAD_COUNT, 1 );
+
+    threadManager.threadWorkReady = std::vector<std::atomic<bool>>(THREAD_COUNT);
+    threadManager.threadWorkDone = std::vector<std::atomic<bool>>(THREAD_COUNT);
+
+    threadManager.particleGroups.resize(PARTICLE_COUNT / THREAD_COUNT);
 }
