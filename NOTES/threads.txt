@@ -1,9 +1,12 @@
 <AtomicObject>.store(<SomeArbitraryValue>, std::memory_order_release);
+<AtomicObject>.load(std::memory_order_release);
 
 .store is equivalent to operator=, but it's ATOMIC. Atomic just bundles operations instead of segmenting them to avoid race conditions of one thread writing to X while another thread is reading X -- it JUST avoids race conditions between threads.
 
 The first parameter is what value to set to that atomic object, and the other parameter is the ORDER.
     the ORDER is similar to pipeline barriers with the GPU, but they're for the compiler now! They're pretty similar.
+
+.load just reads the value.
 
 std::memory_order_release ENSURES (acts as a barrier) that the compiler doesn't move the line of instructions (lines of instructions being your code) from BEFORE the .store call to occur AFTER the .store call
     NO read or write operations that occur BEFORE the .store call can be reordered to occur AFTER the .store call -- this protects the PAST.
@@ -15,3 +18,24 @@ std::memory_order_acquire ENSURES that the compiler doesn't move the line of ins
 For .store(): the reason you'd do this is because you don't want to .store a wrongful value because the compiler loads it wrong;
 For .load(): you'd do this because you don't want to read a wrongful value because the compiler loads it wrong due to jumbling up your code where you don't want it.
     (you can't use _acquire on .store as it's undefined, and you can't use _release on .load() as it's also undefined)
+
+
+
+.wait() puts the thread to sleep until the lambda function returns true (second param)
+However, in order to even have the thread be able to check whether that lambda function is true, we have to notify() it with a function call from another thread: either notify_all() or notify_one() because otherwise it's asleep and won't even be running to check whether the lambda's true.
+    While sleeping, it loses its ownership of the lock (first param), allowing other threads to gain ownership of the lock.
+    Whenever it wakes up, it regains ownership of the lock: if another thread already has ownership of the lock, it will just wait until it becomes available as normal.
+
+        The normal process is this: .wait() activates, if the lambda function is false, the thread goes to sleep, letting another thread run.
+            Then, we do some arbitrary expressions, but we .store() whatever atomic bool to true (or whatever to true the lambda) and THEN notify it. Eventually, when the lambda function turns true (via .store(true)),
+        it has to be notify()'d and wake up for the check to even occur (to check if its true), and then the previously sleeping thread regains ownership of the lock and continues executing past the .wait().
+        The main thread calling notify first needs to set the lambda to true (threadManager.threadWorkReady[threadIndex].load(std::memory_order_acquire) == true), and then the main thread needs to notify_one/all() to notify the condition variable workcompleteCV.
+
+    Thread A calls .notify(), where previously it had set the lambda condition to true.
+    Thread B (the sleeping thread from .wait()) wakes up instantly.
+    Thread B tries to check its lambda condition, but it can't because Thread A still has the lock
+    Thread B is forced to sit and wait in the "Entry Set" queue.
+    Thread A finishes its remaining work and finally releases the lock.
+    Thread B can now grab the lock and actually continue executing, first checking the lambda.
+    Thread B executes whatever because its lambda is true -- it won't be put to sleep because the lambda returns TRUE, allowing it to proceed.
+        Of course, if the lambda returns FALSE, thread B doesn't execute and goes back to bed.
