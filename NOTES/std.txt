@@ -56,9 +56,54 @@ std::is_base_of
     ::value is necessary here because std::is_base_of is a struct, and ::value is how you extract the value of it -- think of it as like a get function(), hence: std::is_base_of<Component, T>::value
 
 std::make_unique
+    make_unique is a kind of combination of 2 things: malloc and std::unique_ptr.
+    std::make_unique<T>(std::forward<Args>(args)...), this creates an object of type <T> on the heap with the arguments we provided for it.
+    It first calls new, and then returns a unique_ptr to that object created with new located on the heap.
+    unique_ptr is JUST special in the sense that it will DESTROY the object when the ptr object goes out of scope.
+    When the unique_ptr object goes out of scope, the underlying object is freed from the heap -- you do NOT have to delete/free it yourself, normal scope rules apply, it's kinda like it's on the stack!
 
 std::forward
+    std::forward is used for "PERFECT FORWARDING"
+    Whenever you pass in a rvalue (just some hardcoded number or whatever, not an object) to a function, the function itself gives it a name so it becomes an lvalue
+    However, std::forward allows you to differentiate between a passed rvalue and an lvalue -- it CHECKS how the arguments were originally passed into the function, whether it be a lvalue or rvalue.
+    One of the reasons to do this is because it allows you to overload functions based on whether or not the arguments passed were an rvalue or lvalue -- you tie it with operator&& on variables.
+        It's similar to std::move, but std::move SOLELY rips the underlying type into an rvalue, it DOES NOT allow you to check whether it's an lvalue -- std::forward is flexible.
+    You HAVE to use the angled brackets to call std::forward: std::foward<theTypename>
+
+    std::forward<Args>(args)...
+        In this context, the ... is saying "aply std::forward<Args> to EVERY (args), and it UNPACKS all the types so it can pass every single argument in args to the constructor
+            YOU MUST UNPACK IT WITH ..., so std::forward<>()... is the default way to invoke args to the constructor. Remember it!
+
+operator&& within function parameters
+    This is REQUIRED for std::forward -- it's called Universal References, and it preserves their EXACT type (lvalue/rvalue). In order to use std::forward, you NEED to use this.
 
 std::move
+    forces the object into an rvalue. this is useful for pointers as you can copy the address which the pointer is pointing to, NOT the address of the pointer thats pointing to that object.
+    This is useful for resource transfers: in the example of a unique_ptr, since it goes out of scope and the object and itself WILL get deleted when it exits the function, in order to preserve that,
+    we use std::move to essentially move ownership from the temporary unique_ptr to our member variable; the original object will get destroyed and be set to null after std::move.
+        Also, unique_ptr doesn't allow copying, so we cant do ptr = unique_ptr, so to circumvent this, we have to get the underlying rvalue type, hence std::move
+        Essentially, it TRANSFERS ownership of this object INSTEAD of duplicating it
+
+
+    === FULL CODE SNIPPET ===
+        template<typename T, typename... Args>
+        T* AddComponent(Args&&... args) {
+            static_assert(std::is_base_of<Component, T>::value, "T must derive from Component");
+
+            // Create new component
+            auto component = std::make_unique<T>(std::forward<Args>(args)...);
+            T* componentPtr = component.get();
+            componentPtr->SetOwner(this);
+            components.push_back(std::move(component));
+            return componentPtr;
+        }
+
+dynamic_cast<>
+    Dynamic cast is similar to static_cast, BUT instead of dynamic_cast checks at RUN TIME instead of COMPILE TIME (where static_cast converts at compile_time)
+    This is primarily used for "downcasting" a base class into a derived class.
+        Derived* d1 = dynamic_cast<Derived*>(basePtr);  // where basePtr is the base class, and derived is a type thats derived from the base class.
+    IF it cannot be converted, it returns nullptr, so it's a good idea to check if d1 is nullptr to see if that cast occurs -- if it fails, it means the <type> is NOT derived from basePtr.
+
+
 
 ==========
