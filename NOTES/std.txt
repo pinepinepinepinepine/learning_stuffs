@@ -1,0 +1,64 @@
+https://docs.vulkan.org/tutorial/latest/Building_a_Simple_Engine/Engine_Architecture/03_component_systems.html
+
+protected keyword
+    not open to the public, BUT objects/functions can be invoked by the derived class and itself (family only!)
+    it's a mix between public and private.
+
+virtual keyword
+    virtual means it is expected to be overriden (you can use the override keyword on the intended function)
+
+    as an example:
+        struct Hey
+        { virtual print(); }
+        struct Bye : Hey
+        { print() override; }
+
+        main()
+        {
+            Hey* word = new Bye(); // the reason we can do this is because a Bye object is a Hey object
+            word.print(); // this will call the print() in struct 'Bye', NOT 'Hey' -- omitting the virtual will call print() in struct 'Hey'.
+        } // As a heads up, keyword 'new' creates the object on the heap instead of the stack -- it's like malloc.
+
+explicit keyword
+    explicit means the object cannot be implicitly converted.
+        So, in the case of constructors: whenever a value gets implicitly converted to a type (like for passing an rvalue into a function call)
+        If the constructor is like:
+        StructObj(int guh), and you have a function like, print(StructObj buh), then you can call print(10) BECAUSE the constructor is able to construct a structObj with an int
+        HOWEVER, writing explicit StructObj(int guh) PREVENTS the compiler from doing that implicit conversion, so now you must call print like: print(StructObj(10)) -- you must be EXPLICIT.
+        this also includes for initializing and setting values: you cant just do StructObj obj = 10, you MUST do StructObj obj = StructObj(10)
+
+
+'...' operator (formally called 'Ellipsis')
+    which allows you to accept an arbitrary amount of arguments in a function -- it's sort of like argv in call
+    The way this code snippet works is like this:
+
+            template<typename T, typename... Args>
+        T* AddComponent(Args&&... args) {
+            static_assert(std::is_base_of<Component, T>::value, "T must derive from Component");
+            // Create new component
+            auto component = std::make_unique<T>(std::forward<Args>(args)...); }
+
+        AddComponent accepts ANY type of args, but the type T HAS to have a constructor that accepts those EXACT args types
+        This makes a SINGLE component of type T, where the component of type T was constructed with those args.
+
+        The way you INVOKE this function to begin with is like so: someEntityObject.AddComponent<ComponentType>(A, Bunch, of, Args, Needed, to, Construct, ComponentType!)
+            The <> operator explicitly states what type the typename T will be -- you've used it for static_cast!
+
+
+static_assert
+    Static: it's for the compiler itself. While compiling, it the condition provided in the () arguments are FALSE, the compiler stops building your program altogether -- preventing you from running!
+    So, if static_assert(std::is_base_of<Component, T>::value, "T must derive from Component") is false -- where Component is NOT the base class of derived class Type T (T is not derived from Component) -- then the compiler stops compiling.
+        And the second parameter is just the output print, first parameter is the "is false, stop program"
+
+
+std::is_base_of
+    Checks for whether or not the first parameter is the base class of the second parameter. If the first parameter is the base class of the second parameter, return True. Otherwise, false.
+    ::value is necessary here because std::is_base_of is a struct, and ::value is how you extract the value of it -- think of it as like a get function(), hence: std::is_base_of<Component, T>::value
+
+std::make_unique
+
+std::forward
+
+std::move
+
+==========
