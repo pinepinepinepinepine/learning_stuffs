@@ -15,10 +15,9 @@ void RenderApplication::setup()
     swapChain.createSwapChain( device, window );
     createAttachmentImages();
 
-    catTexture.createTextureImage( device, "../textures/spinT.png" );
     textureSampler = createTextureSampler();
-    catTexture.setTextureSampler( textureSampler );
 
+    createTextures();
     createModels();
 
     createMVPUBOBuffers();
@@ -36,13 +35,23 @@ void RenderApplication::setup()
     createThreads();
 }
 
+void RenderApplication::createTextures()
+{
+    auto catTexture = std::make_unique<Texture>();
+    const char* catFilepath = "../textures/spinT.png";
+
+    catTexture->createTextureImage( device, catFilepath );
+    catTexture->setTextureSampler( textureSampler );
+    catTextureHandle = textureManager.addResource( hashString(catFilepath), std::move(catTexture) );
+}
+
 void RenderApplication::createModels()
 {
     auto catModel = std::make_unique<ModelData>();
     const char* catFilepath = "../models/spin.obj";
 
     catModel->loadModel( device, catFilepath ); // Maybe make loadModel return it directly instead of needing to make a seperate variable?
-    catHandle = modelManager.addResource( hashString( catFilepath ), std::move(catModel) );
+    catModelHandle = modelManager.addResource( hashString( catFilepath ), std::move(catModel) );
 }
 
 void RenderApplication::cleanup()
@@ -50,7 +59,7 @@ void RenderApplication::cleanup()
     threadManager.stopThreads();
 
     swapChain.cleanupSwapChainViews(); // Raii EXPLICITLY wants to delete the swap chain images itself.
-    catTexture.textureImage.cleanupImage( device.logicalDevice );
+    catTextureHandle.get()->textureImage.cleanupImage( device.logicalDevice );
     colourImage.cleanupImage( device.logicalDevice );
     depthImage.cleanupImage( device.logicalDevice );
 
@@ -179,7 +188,7 @@ void RenderApplication::createDebugBuffers()
         GPUBuffer individualBuffer;
         individualBuffer.createGPUBuffer(
             device,
-            sizeof(Vertex) * catHandle.get()->vertices_count,
+            sizeof(Vertex) * catModelHandle.get()->vertices_count,
             vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
             true );
@@ -261,8 +270,8 @@ void RenderApplication::createModelDescriptors()
     for ( int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
     {
         descriptors.setBufferResource( device.logicalDevice, mvp_uboBuffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(mvpUBOBuffer), i, 0 );
-        descriptors.setSamplerResource( device.logicalDevice, *catTexture.textureSampler, catTexture.textureImage.imageView, i, 1 );
-        descriptors.setBufferResource( device.logicalDevice, debug_uboBuffers[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Vertex) * catHandle.get()->vertices_count, i, 2 );
+        descriptors.setSamplerResource( device.logicalDevice, *catTextureHandle.get()->textureSampler, catTextureHandle.get()->textureImage.imageView, i, 1 );
+        descriptors.setBufferResource( device.logicalDevice, debug_uboBuffers[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Vertex) * catModelHandle.get()->vertices_count, i, 2 );
     }
 }
 

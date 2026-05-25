@@ -32,7 +32,6 @@ struct RenderApplication
     DedicatedCommandBuffers cmdBuffers;
 
     vk::raii::Sampler textureSampler = nullptr;
-    Texture catTexture;
 
     vk::raii::DescriptorPool descriptorPool = nullptr;
     Descriptor descriptors;
@@ -57,9 +56,10 @@ struct RenderApplication
     ThreadManager threadManager;
 
     ResourceManager<ModelData> modelManager;
-    ResourceHandle<ModelData> catHandle;
+    ResourceHandle<ModelData> catModelHandle;
 
     ResourceManager<Texture> textureManager;
+    ResourceHandle<Texture> catTextureHandle;
 
     void setup();
     void createVertexGraphicsPipeline();
@@ -78,6 +78,7 @@ struct RenderApplication
 
     void createThreads();
     void createModels();
+    void createTextures();
 };
 
 // TODO: Maybe move the functions to particle.cpp/vertex.hpp for their pipelines?
