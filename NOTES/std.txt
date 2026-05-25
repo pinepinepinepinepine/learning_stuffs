@@ -105,5 +105,19 @@ dynamic_cast<>
     IF it cannot be converted, it returns nullptr, so it's a good idea to check if d1 is nullptr to see if that cast occurs -- if it fails, it means the <type> is NOT derived from basePtr.
 
 
+mutable keyword
+    The mutable keyword is used to allow a const member function to modify the contents of a member variable.
+    Usually, a const member function cannot modify the members of its struct AT ALL. However, mutable bypasses this.
+        https://docs.vulkan.org/tutorial/latest/Building_a_Simple_Engine/Engine_Architecture/03_component_systems.html#_common_component_types
+        This code snippet: the GetTransformationMatrix() function is const, and usually this function cannot modify the member variables.
+        However, members transformationMatrix and transformationDirty are mutable:
+        allowing GetTransformationMatrix's operations to modify the contents even though the function itself is const!
+
+operator~ on functions
+    ~ means it's a destructor:
+        virtual ~Component() { }
+    indicates it will execute the bracket code when the object goes out of scope -- this is used to clean stuff up after the destruction of the object
+    So if we need to modify something when the object is destroyed, such as setting something else's state to zombie or destroyed to notify another object, then we can use the destructor to do that.
+
 
 ==========
