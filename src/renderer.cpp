@@ -19,7 +19,7 @@ void RenderApplication::setup()
     textureSampler = createTextureSampler();
     catTexture.setTextureSampler( textureSampler );
 
-    catModel.loadModel( device, "../models/spin.obj" );
+    createModels();
 
     createMVPUBOBuffers();
     createParticleComputeBuffers();
@@ -34,6 +34,15 @@ void RenderApplication::setup()
     createParticleComputePipeline();
 
     createThreads();
+}
+
+void RenderApplication::createModels()
+{
+    auto catModel = std::make_unique<ModelData>();
+    const char* catFilepath = "../models/spin.obj";
+
+    catModel->loadModel( device, catFilepath ); // Maybe make loadModel return it directly instead of needing to make a seperate variable?
+    catHandle = modelManager.addResource( hashString( catFilepath ), std::move(catModel) );
 }
 
 void RenderApplication::cleanup()
@@ -170,7 +179,7 @@ void RenderApplication::createDebugBuffers()
         GPUBuffer individualBuffer;
         individualBuffer.createGPUBuffer(
             device,
-            sizeof(Vertex) * catModel.vertices_count,
+            sizeof(Vertex) * catHandle.get()->vertices_count,
             vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
             true );
@@ -253,7 +262,7 @@ void RenderApplication::createModelDescriptors()
     {
         descriptors.setBufferResource( device.logicalDevice, mvp_uboBuffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(mvpUBOBuffer), i, 0 );
         descriptors.setSamplerResource( device.logicalDevice, *catTexture.textureSampler, catTexture.textureImage.imageView, i, 1 );
-        descriptors.setBufferResource( device.logicalDevice, debug_uboBuffers[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Vertex) * catModel.vertices_count, i, 2 );
+        descriptors.setBufferResource( device.logicalDevice, debug_uboBuffers[i].gpuBuffer, vk::DescriptorType::eStorageBuffer, sizeof(Vertex) * catHandle.get()->vertices_count, i, 2 );
     }
 }
 

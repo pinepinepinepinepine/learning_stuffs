@@ -12,6 +12,7 @@
 #include "model.hpp"
 #include "particle.hpp"
 #include "thread.hpp"
+#include "../componentAbstractions/headers/resourceManager.hpp"
 
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -53,9 +54,12 @@ struct RenderApplication
     Pipeline particleGraphicPipeline;
     Pipeline particleComputePipeline;
 
-    ModelData catModel;
-
     ThreadManager threadManager;
+
+    ResourceManager<ModelData> modelManager;
+    ResourceHandle<ModelData> catHandle;
+
+    ResourceManager<Texture> textureManager;
 
     void setup();
     void createVertexGraphicsPipeline();
@@ -73,6 +77,7 @@ struct RenderApplication
     void cleanup();
 
     void createThreads();
+    void createModels();
 };
 
 // TODO: Maybe move the functions to particle.cpp/vertex.hpp for their pipelines?

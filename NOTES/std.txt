@@ -119,5 +119,13 @@ operator~ on functions
     indicates it will execute the bracket code when the object goes out of scope -- this is used to clean stuff up after the destruction of the object
     So if we need to modify something when the object is destroyed, such as setting something else's state to zombie or destroyed to notify another object, then we can use the destructor to do that.
 
+inline keyword
+    the inline keyword is applied to manage the One Definition Rule.
+    Due to us resourceManager housing hashString, and that being included in multiple files, it'll copy and paste the same code for every single file when it's getting compiled
+    Inline just says "use the code of the function directly instead of definining the function multiple times per file"
+    effectively, it just copies the function's body code from where this function is being called.
+        It's like copy and pasting the function body every single time the function is being called -- a direct replacement.
+    For the linker, it also tells the linker to just use one definition of this function and let every call to that function use the linker's pick
+        Which circumvents the One Definition Rule (otherwise code blows up because it has no idea which function to choose)
 
 ==========

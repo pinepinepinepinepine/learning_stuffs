@@ -1,35 +1,5 @@
 #include "../headers/model.hpp"
 
-
-uint32_t findGPUBufferMemoryType_GUH( const vk::raii::PhysicalDevice& physicalDevice, uint32_t typeFilter, vk::MemoryPropertyFlags properties )
-{
-    vk::PhysicalDeviceMemoryProperties memProperties = physicalDevice.getMemoryProperties();
-
-    for ( uint32_t i = 0; i < memProperties.memoryTypeCount; i++ )
-    {
-        if ( ( typeFilter & ( 1 << i ) ) && ( ( memProperties.memoryTypes[i].propertyFlags & properties ) == properties ) )
-            return i;
-    }
-    throw std::runtime_error("failed to find suitable GPU memory type!");
-}
-
-void copyBuffer_GUH( vk::raii::Buffer& srcBuffer, vk::raii::Buffer& dstBuffer, vk::DeviceSize size )
-{
-        // just returns a ready to record (.begin'd) command buffer
-        TransientCommandBuffer submitCmdBuffer;
-
-        submitCmdBuffer.beginSingleTimeCommands();
-
-        // record the buffer:
-        // copyBuffer just copies the contents of the Source Buffer (param1) into the Destination Buffer (param2) up to whatever bytes (param3)
-        // copyBuffer's third param takes a vk::BufferCopy object, the first two members of BufferCopy struct is .srcOffset and .dstOffset (we're not offsetting what byte to start from, hence both 0), and the .size
-        submitCmdBuffer.commandBuffer.copyBuffer( srcBuffer, dstBuffer, vk::BufferCopy( 0, 0, size ) );
-
-        // moved the old code to endSingleTimeCommands -- it's the same gimmick, just sends the buffer to execute its recorded commands.
-        submitCmdBuffer.endSingleTimeCommands();
-    }
-
-
 void ModelData::loadModel( const LogicalDevice& device, const char *filename )
 {
     tinyobj::attrib_t attrib;
