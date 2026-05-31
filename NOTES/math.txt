@@ -115,7 +115,40 @@ The reason we do this is for our culling system:
 Distance = (Normal dotproduct. ObjectPosition) − Offset
 
 If distance is positive: object is past the wall we've established with the vectors -- CULL IT -- see: https://www.desmos.com/3d/zv3ucrneys
-If it's negative: the object is inside the wall, so don't cull it.
+If it's negative: the object is outside the wall, so don't cull it.
+
+Why? We can check whether or not a point lies on the plane by plugging in its coords within the plane's equation:
+    For example: 0x + -0.906308y + 0.422618z = -33.8339, and the point 10, 60, 50
+        If plugging the point into the equation above is 0: the point lies on the plane.
+        However, the way we're checking is similar in spirit, but tells us whether a point is inside the walls essentially:
+
+    ***USE THE DESMOS GRAPH TO CHECK POINTS YOURSELF AS A VISUALIZER***
+
+Distance = (Normal dotproduct. ObjectPosition) − Offset
+
+> dot product( 0x + -0.906308y + 0.422618z, 10, 60, 50 ) = -33.24758
+    aka: 0(10) + -0.906308(60) + 0.422618(50) = -33.24758
+> -33.24758 - Offset = -33.24758 - -33.8339 = 0.58632
+Distance = 0.58632
+
+IF our Frustum's plane's normals are INWARDS:
+    Distance > 0: the point is infront of the plane -- render it.
+    Distance = 0: the point lies precisely on the plane.
+    Distance < 0: the point is behind the plane -- cull it.
+IF our Frustum's plane's normals are OUTWARDS:
+    Distance > 0: the point is behind the plane -- cull it.
+    Distance = 0: the point lies precisely on the plane.
+    Distance < 0: the point is infront of the plane -- render it.
+
+A plane's normals are considered OUTWARDS if the points p0 -> p1 -> p2 -> p0 used to calculate the normal are counter-clockwise
+    If it's clockwise, the plane's INWARDS.
+
+Since our planes are outwards and distance is > 0, we cull it.
+
+For the logic of code: iterate through the frustum's planes, run the formula Distance = (Normal dotproduct. ObjectPosition) − Offset for EVERY plane,
+ if the distance is > 0 for EVEN JUST ONE PLANE, break the loop (like return or whatever): then IF the loop successfully exits, return true/render it.
+
+    TLDR: ensure all the planes' normals directions are either inward or outward so we don't have to muddy up culling logic to account for a different plane's direction
 
 The exact way to handle culling isn't yet explored, but see https://docs.vulkan.org/tutorial/latest/Building_a_Simple_Engine/Engine_Architecture/05_rendering_pipeline.html#_scene_culling
 for what the "pseudo code snippet" (ugh) does and try to mimic it. Just play around with it.

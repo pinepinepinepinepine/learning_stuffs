@@ -358,11 +358,14 @@ inline void Frustum::getFrustum() // return frustum instead of void when finishe
     float nearPlaneOffset = glm::dot( nearPlaneNormal, p2);  // AND THE SECOND PART IS THE OFFSET: WHICH IS GIVEN BY DOT PRODUCT OF THE PLANE'S NORMAL AND SOME ARBITRARY POINT ON THE PLANE.
     std::cout << "nearPlaneNormal: (" << nearPlaneNormal.x << ", " << nearPlaneNormal.y << ", " << nearPlaneNormal.z << ")" << " Offset: " << nearPlaneOffset << std::endl;
 
-    p0 = farBottomRight; p1 = farBottomLeft; p2 = farTopLeft; // SAME THING, BUT FOR FAR:
+    p0 = farBottomLeft; p1 = farBottomRight; p2 = farTopLeft; // SAME THING, BUT FOR FAR:
     glm::vec3 farPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1));
     float farPlaneOffset = glm::dot(farPlaneNormal, farTopRight); // JUST to show off that it can be ANY point (technically p3 in this context!)
     std::cout << "farPlaneNormal: (" << farPlaneNormal.x << ", " << farPlaneNormal.y << ", " << farPlaneNormal.z << ")" << " Offset: " << farPlaneOffset << std::endl;
 
+    // One thing to ensure: check math.txt about culling rules: ensure the p0, p1,and p2 are ALL either COUNTER CLOCKWISE or CLOCKWISE across all
+    // this is because for our culling logic, we want to ensure we can use the same logic of "Greater than the plane's offset is culled or rendered"
+    // The way to check is visualize if the points from p0 -> p1 -> p2 -> p0 is clockwise/counterclockwise: if it's counterclockwise, it's OUTWARD, so greater than 0 distance is culled.
 
     // I presume we're gonna have to recalculate the frustum on EVERY rotation/movement of the camera. So... just a heads up when we finish up within runtime.cpp -- DON'T FORGET TO KEEP IT CONTINUALLY UPDATED.
 }
