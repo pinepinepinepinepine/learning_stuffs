@@ -16,9 +16,10 @@ void RenderApplication::setup()
     createAttachmentImages();
 
     textureSampler = createTextureSampler();
-
     createTextures();
     createModels();
+
+    createCatEntity();
 
     createMVPUBOBuffers();
     createParticleComputeBuffers();
@@ -43,6 +44,12 @@ void RenderApplication::createTextures()
     catTexture->createTextureImage( device, catFilepath );
     catTexture->setTextureSampler( textureSampler );
     catTextureHandle = textureManager.addResource( hashString(catFilepath), std::move(catTexture) );
+
+    auto poTexture = std::make_unique<Texture>();
+    const char* poFilepath = "../textures/guh.png";
+    poTexture->createTextureImage( device, poFilepath );
+    poTexture->setTextureSampler( textureSampler );
+    poTextureHandle = textureManager.addResource( hashString(poFilepath), std::move(poTexture) );
 }
 
 void RenderApplication::createModels()
@@ -50,8 +57,23 @@ void RenderApplication::createModels()
     auto catModel = std::make_unique<ModelData>();
     const char* catFilepath = "../models/spin.obj";
 
-    catModel->loadModel( device, catFilepath ); // Maybe make loadModel return it directly instead of needing to make a seperate variable?
+    catModel->loadModel( device, catFilepath ); // Maybe make loadModel return it directly instead of needing to make a separate variable?
     catModelHandle = modelManager.addResource( hashString( catFilepath ), std::move(catModel) );
+}
+
+
+void RenderApplication::createCatEntity()
+{
+    cat.addComponent<ModelComponent>( catModelHandle.get() );
+    cat.addComponent<TextureComponent>( poTextureHandle.get() );
+    cat.addComponent<TransformComponent>( glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f) ); // Fix this. Temporary, just using default.
+    cat.addComponent<CameraComponent>();
+
+    camera.addComponent<TransformComponent>( glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f) );
+    camera.GetComponent<TransformComponent>()->SetPosition( {0, 35, -5} );
+    camera.GetComponent<TransformComponent>()->SetRotation( { 0.0f, 0.0f, -1.0f, 0.0f } );
+    camera.addComponent<CameraComponent>();
+    camera.GetComponent<CameraComponent>()->setPerspective( 50.0f, 16.0 / 9.0f, 0.1f, 1000.0f );
 }
 
 void RenderApplication::cleanup()
@@ -60,6 +82,7 @@ void RenderApplication::cleanup()
 
     swapChain.cleanupSwapChainViews(); // Raii EXPLICITLY wants to delete the swap chain images itself.
     catTextureHandle.get()->textureImage.cleanupImage( device.logicalDevice );
+    poTextureHandle.get()->textureImage.cleanupImage( device.logicalDevice );
     colourImage.cleanupImage( device.logicalDevice );
     depthImage.cleanupImage( device.logicalDevice );
 

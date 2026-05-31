@@ -78,22 +78,22 @@ vk::PipelineMultisampleStateCreateInfo Pipeline::createMultisampling( vk::Sample
 vk::PipelineDepthStencilStateCreateInfo Pipeline::createDepthStencil()
 {
     // ADD THIS GARBAGE BACK
-    // vk::PipelineDepthStencilStateCreateInfo depthStencilCreateInfo {
-    //     .depthTestEnable       = vk::True,
-    //     .depthWriteEnable      = vk::True,
-    //     .depthCompareOp        = vk::CompareOp::eLess,
-    //     .depthBoundsTestEnable = vk::False,
-    //     .stencilTestEnable     = vk::False
-    // };
-
-
     vk::PipelineDepthStencilStateCreateInfo depthStencilCreateInfo {
-        .depthTestEnable       = vk::False,
-        .depthWriteEnable      = vk::False,
-        .depthCompareOp        = vk::CompareOp::eAlways,
+        .depthTestEnable       = vk::True,
+        .depthWriteEnable      = vk::True,
+        .depthCompareOp        = vk::CompareOp::eLess,
         .depthBoundsTestEnable = vk::False,
         .stencilTestEnable     = vk::False
     };
+
+
+    // vk::PipelineDepthStencilStateCreateInfo depthStencilCreateInfo {
+    //     .depthTestEnable       = vk::False,
+    //     .depthWriteEnable      = vk::False,
+    //     .depthCompareOp        = vk::CompareOp::eAlways,
+    //     .depthBoundsTestEnable = vk::False,
+    //     .stencilTestEnable     = vk::False
+    // };
     return depthStencilCreateInfo;
 }
 

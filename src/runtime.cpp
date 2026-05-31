@@ -1,6 +1,5 @@
 #include "../headers/runtime.hpp"
-
-
+#include "../headers/externState.hpp"
 
 
 void RunTimeApplication::createSynchronizationObjects()
@@ -18,25 +17,98 @@ void RunTimeApplication::createSynchronizationObjects()
     submissionTimelineSemaphore = vk::raii::Semaphore( app->device.logicalDevice, { .pNext = &semaphoreCreateInfo } );
 }
 
+// I should separate this.
 void RunTimeApplication::updateMVPUBOBuffer()
 {
 
     static auto startTime = std::chrono::high_resolution_clock::now();
-
 	auto  currentTime = std::chrono::high_resolution_clock::now();
 	float time        = std::chrono::duration<float>(currentTime - startTime).count();
 
     mvpUBOBuffer mvpTransformationMatrix{};
 
-    mvpTransformationMatrix.model = glm::rotate( glm::mat4(1.0f), time* glm::radians(160.0f), glm::vec3(0.0f, 1.0f, 0.0f) );
+    // Camera Rotation
+    float camera_rotation_side = ( held_q ? 1 : 0 ) + ( held_e ? -1 : 0);
+    static float radians_side = 0.0f;
+    int move_by = 0;
+    if ( held_click && moving_cursor )
+        move_by = cursor_clicked_at.x - current_cursor_position.x;
+    radians_side += ( move_by / 1000000.0f );
+    glm::quat rotaQuat_side = glm::angleAxis( glm::degrees( radians_side ), glm::vec3( 0.0f, 1.0f, 0.0f ) );
 
-    mvpTransformationMatrix.view = glm::lookAt(glm::vec3(-20.0f, 30.0f, 60.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    float camera_rotation_up = ( held_x ? -1 : 0 ) + ( held_c ? 1 : 0);
+    static float radians_up = 0.0f;
+    int shift_by = 0;
+    if ( held_click && moving_cursor )
+        shift_by = current_cursor_position.y - cursor_clicked_at.y;
+    radians_up += ( shift_by / 1000000.0f );
+    glm::quat rotaQuat_up = glm::angleAxis( glm::degrees( radians_up ), glm::vec3( 1.0f, 0.0f, 0.0f ) );
 
-    mvpTransformationMatrix.proj = glm::perspective(
-        glm::radians(90.0f), static_cast<float>(app->swapChain.imageResolution.width) / static_cast<float>(app->swapChain.imageResolution.height), 0.1f, 350.0f );
+    glm::quat rotaQuat = rotaQuat_side * rotaQuat_up;
+    app->camera.GetComponent<TransformComponent>()->SetRotation( rotaQuat );
+
+
+    // Camera Position
+    glm::vec3 movementVector(
+        ( held_a ? 1 : 0 ) + ( held_d ? -1 : 0 ),
+        ( held_space ? 1 : 0 ) + ( held_ctrl ? -1 : 0 ),
+        ( held_w ? 1 : 0 ) + ( held_s ? -1 : 0 ) );
+    if ( glm::length( movementVector ) >= 1.0f )
+        movementVector = glm::normalize( movementVector ); // Normalize it to have a length of 1 so we don't get that strafe thing where speed is faster when going sideways (Counter-strike's ladders!)
+
+    glm::vec3 position = app->camera.GetComponent<TransformComponent>()->GetPosition();
+        // glm::vec3 z_movement = rotaQuat * glm::vec3( 0.0f, 0.0f, 1.0f );
+        // glm::vec3 y_movement = rotaQuat * glm::vec3( 0.0f, 1.0f, 0.0f );
+        // glm::vec3 x_movement = rotaQuat * glm::vec3( 1.0f, 0.0f, 0.0f );
+        // position.x += (movementVector.z * z_movement.x) + (movementVector.x * x_movement.x) + (movementVector.y * y_movement.x);
+        // position.y += (movementVector.z * z_movement.y) + (movementVector.x * x_movement.y) + (movementVector.y * y_movement.y);
+        // position.z += (movementVector.z * z_movement.z) + (movementVector.x * x_movement.z) + (movementVector.y * y_movement.z);
+    position += (rotaQuat * movementVector); // Above comment block is the MANUAL way of calculating this.
+    app->camera.GetComponent<TransformComponent>()->SetPosition( position );
+
+    // Model Rotation
+    static double last_frame_time = glfwGetTime();
+    static double total_spin_time = 0;
+    double curr = glfwGetTime();
+    double time_passed = curr - last_frame_time;
+    if ( toggle_r )
+    {
+        total_spin_time += time_passed;
+        glm::quat cat_rotation = glm::angleAxis( glm::degrees( float( total_spin_time * ( 0.174533f ) ) ), glm::vec3( 0.0f, 1.0f, 0.0f ) ); // Just... ugly number.
+        app->cat.GetComponent<TransformComponent>()->SetRotation( cat_rotation );
+    }
+    last_frame_time = curr;
+
+    // this DEFINITELY does NOT need to be here. fix later. this variable is here so we don't have to perma set it while toggle'd
+    static bool was_toggled = false;
+    if ( !was_toggled && toggle_t )
+    {
+        app->cat.GetComponent<TextureComponent>()->setTexture( app->poTextureHandle.get() );
+
+        for ( int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+        {
+            app->descriptors.setSamplerResource( app->device.logicalDevice, *app->poTextureHandle.get()->textureSampler, app->poTextureHandle.get()->textureImage.imageView, i, 1 );
+        }
+    }
+    else if ( was_toggled && !toggle_t )
+    {
+        app->cat.GetComponent<TextureComponent>()->setTexture( app->catTextureHandle.get() );
+        for ( int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+        {
+            app->descriptors.setSamplerResource( app->device.logicalDevice, *app->catTextureHandle.get()->textureSampler, app->catTextureHandle.get()->textureImage.imageView, i, 1 );
+        }
+    }
+    was_toggled = toggle_t;
+
+    mvpTransformationMatrix.model = app->cat.GetComponent<TransformComponent>()->GetTransformMatrix();
+    mvpTransformationMatrix.view = app->camera.GetComponent<CameraComponent>()->getViewMatrix(); // me: Figure out how engines do a global camera.
+    mvpTransformationMatrix.proj = app->camera.GetComponent<CameraComponent>()->getProjectionMatrix();
     mvpTransformationMatrix.proj[1][1] *= -1; // Flip Y for Vulkan
 
     memcpy( app->mvp_uboBuffers[executingCommandBufferIndex].gpuBufferMapped, &mvpTransformationMatrix, sizeof(mvpTransformationMatrix) );
+
+    //std::cout << "Position of Camera: " << position.x << "x, " << position.y << "y, " << position.z << "z" << std::endl;
+    //std::cout << "Quaternion Rotation of Camera: " << rotaQuat.w << ", " << rotaQuat.x << ", " << rotaQuat.y << ", " << rotaQuat.z << "\n\n";
 }
 
 void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
@@ -290,7 +362,15 @@ void RunTimeApplication::mainLoop()
 {
     while (!glfwWindowShouldClose( app->window.window ))
     {
+        moving_cursor = false;
         glfwPollEvents();
+
+        if ( moving_cursor == false && held_click )
+        {
+            cursor_clicked_at = glm::vec2( current_cursor_position.x, current_cursor_position.y );
+        }
+
+
         drawFrame();
 
         double currentTime = glfwGetTime();

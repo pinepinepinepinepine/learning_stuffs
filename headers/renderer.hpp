@@ -13,6 +13,7 @@
 #include "particle.hpp"
 #include "thread.hpp"
 #include "../componentAbstractions/headers/resourceManager.hpp"
+#include "../componentAbstractions/headers/entity.hpp"
 
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -60,6 +61,10 @@ struct RenderApplication
 
     ResourceManager<Texture> textureManager;
     ResourceHandle<Texture> catTextureHandle;
+    ResourceHandle<Texture> poTextureHandle;
+
+    Entity cat {"Cat"};
+    Entity camera {"Camera"};
 
     void setup();
     void createVertexGraphicsPipeline();
@@ -79,6 +84,8 @@ struct RenderApplication
     void createThreads();
     void createModels();
     void createTextures();
+
+    void createCatEntity();
 };
 
 // TODO: Maybe move the functions to particle.cpp/vertex.hpp for their pipelines?

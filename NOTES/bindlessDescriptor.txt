@@ -1,0 +1,19 @@
+
+A bindless descriptor is a sort of index array which contains JUST pointers to the resources
+These resources can be textures, models, etc -- anything
+The idea is that instead of creating multiple descriptors for a single object, we just use this central one
+and the way to specify what details we want with the thing we're drawing is by passing a push constant
+on that command buffer which contains the index for what resource we want to access, such as pushing index 40 for the model, and index 80 for the texture.
+    We first allocate it once at start up with all the assets we want, and then reuse that during runtime.
+
+
+We add these features to support them:
+    features.template get<vk::PhysicalDeviceDescriptorIndexingFeatures>().descriptorBindingPartiallyBound &&
+    features.template get<vk::PhysicalDeviceDescriptorIndexingFeatures>().descriptorBindingVariableDescriptorCount &&
+    features.template get<vk::PhysicalDeviceDescriptorIndexingFeatures>().runtimeDescriptorArray &&
+    features.template get<vk::PhysicalDeviceDescriptorIndexingFeatures>().shaderSampledImageArrayNonUniformIndexing;
+
+We first need to enable the features, then create a pool which the flag vk::DescriptorPoolCreateFlagBits::eUpdateAfterBind
+
+
+// WORK ON THIS LATER.
