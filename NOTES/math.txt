@@ -1,0 +1,123 @@
+=====================================
+            Frustum Stuff
+
+https://docs.vulkan.org/tutorial/latest/Building_a_Simple_Engine/Engine_Architecture/05_rendering_pipeline.html#_scene_culling
+
+Scene culling works by getting the planes (like walls) of the camera frustum (what the camera sees) and computing whether or not the OBJECT BOUNDs of some object lies inside the frustum or outside of it.
+    If it's inside the frustum, don't cull the object; if the bounding "VOLUME" is outside the frustrum, cull the ENTIRE object.
+        If we check against EVERY single vertex with a CPU, it'd be terribly slow (more of a GPU job), so we check one "point", which is the bounding.
+
+    If, hypothetically, the bounds of some object IS peeking inside the frame, BUT some of the volume of the bounds IS outside the frustrum's view, we still render that object
+        this is because otherwise the entire object itself would be peeking in and out of existence, as if we move our camera by like 0.01mm (just enough so that the "CENTER" of the bounding box is inside)
+        and then the BOUNDING "POINT" is considered INSIDE, we could go back and forth and it'd force the object to be rendered.
+            anyways, the idea is we're checking the entire radius of the object via a bounding box or a sphere, which is a box/sphere to encompass the entire object
+                if the bounding boundries are present inside the frustrum, render the object.
+
+    https://yearlyboar.wordpress.com/wp-content/uploads/2015/01/simple_cube1.jpg
+    https://en.wikipedia.org/wiki/Bounding_volume
+        https://en.wikipedia.org/wiki/Bounding_volume#Common_types ( for some common types of what people use: boxes, spheres, and different kinds of boxes to encompass some objects)
+
+
+    Anyways: entity.hpp's Frustum::getFrustum(): https://stackoverflow.com/questions/13665932/calculating-the-viewing-frustum-in-a-3d-space
+The majority of it is just: remember the formula/calculations that need to be done to get the individual points, but the thing interesting is the planes:
+
+farTopLeft: (828.991, 501.308, -1005)
+farTopRight: (-828.991, 501.308, -1005)
+farBottomLeft: (828.991, -431.308, -1005)
+farBottomRight: (-828.991, -431.308, -1005)
+nearTopLeft: (0.0828991, 35.0466, -5.1)
+nearTopRight: (-0.0828991, 35.0466, -5.1)
+nearBottomLeft: (0.0828991, 34.9534, -5.1)
+nearBottomRight: (-0.0828991, 34.9534, -5.1)
+
+    p0 = nearBottomLeft; p1 = farBottomLeft; p2 = farTopLeft;
+    glm::vec3 leftPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1));
+
+    the first step is to get their directions via substraction of 2 3d points (xyz)
+Subtracting two 3d vertices (points) returns a "vector" (which is KINDA confusing because it's not a std::vector), but in mathematical terms, it's a direction
+and this math vector's direction IS the direction that connects them:
+
+(p1 - p0) = (farBottomLeft - nearBottomLeft) = ( (828.991, -431.308, -1005) - (0.0828991, 34.9534, -5.1) )
+= (828.991 - 0.0828991, -431.308 - 34.9534, -1005 - -5.1)   // subtracting 2 3d points is just x1 - x2 to their respective points
+= ( 828.9081009, -466.2614,  -999.9 )
+
+So, subtracting point0 from point1 (p1 - p0) returns a direction vector that points from point0 to point1:
+    And so (without normalizing), directly adding that vector direction onto p0 returns p1 (aside from it being the opposite of subtracting, it's also its direction)
+
+Just the same thing but for p2-p1:
+= (828.991, 501.308, -1005) - (828.991, -431.308, -1005)
+= (828.991 - 828.991, 501.308 - -431.308, -1005 - -1005 )
+= ( 0, 932.616, 0 )
+
+
+    the second step is to then get their cross product of the 2 directional vectors, which returns a new directional vector that is perpendicular to both original vectors.
+        I'm not manually calculating the dot product because it's annoying asf: check the old MATH_NOTES.txt with the old file. I'm using a calculator (glm's cross func).
+cross: (932522, -0, 773053) // Likely rounded due to std::cout
+    This is a direction vector that is fully perpendicular to those 2 original vector.
+
+    the third step is normalizing it, which returns a length of 1 BUT of the same direction (we do this because (932522, -0, 773053) is a length of like 1 million )
+
+The formula of normalization is the vector divided by the length (formally known as magnitude) of a vector: ( vector / ||vector|| )   (||vector|| is how it's symbol'd)
+
+To get the length of a vector (ORIGINAL ONE, NOT NORMALIZED):
+sqrt( x^2, y^2, z^2) = sqrt( 932522^2, 0^2, 773053^2) = 1,211,283.7
+
+vector / 1,211,283.7 (magnitude of the vector)
+
+(932522, -0, 773053) / 1,211,283.7 = ( 932522 / 1,211,283.7, -0 / 1,211,283.7, 773053 / 1,211,283.7 )
+= ( 0.76986258462, 0, 0.63820969439 )
+
+( 0.76986258462, 0, 0.63820969439 ) is our final vector to that whole equation (glm::vec3 leftPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1));)
+It's just a normalized direction vector that is perpendicular to the two direction vectors from p0 to p1, and p1 to p2.
+
+https://www.desmos.com/3d/zv3ucrneys For a visualization.
+
+------
+    After that expression, we need to get the DOT PRODUCT.
+        The two vectors have to have the same amount of elements in them (not magnitude, magnitude's whatever)
+
+float leftPlaneOffset = glm::dot(leftPlaneNormal, p0);
+
+The formula is: (x1 * x2) + (y1 * y2) + (z1 * z2)
+= glm::dot( ( 0.76986258462, 0, 0.63820969439 ), (0.0828991, 34.9534, -5.1) )
+= (0.76986258462 * 0.0828991) + (0 * 34.9534) + (0.63820969439 * -5.1)
+= (0.06382091538) + (0) + (-3.25486944139)
+= -3.19104852601
+
+The dot product tells us the "directional alignment"
+
+If the dot product return is...
+Positive: the vectors point in the same direction
+Negative: the vectors point in opposite directions
+If the return is EXACTLY 0: the vectors are perfectly perpendicular
+
+In this case, the dot product tells us the offset of the plane (so we can line up the plane appropriately, see the desmos graph and fiddle around with = Offset)
+
+IF you compute the dot product of a PLANE and a POINT on that plane, you get the offset (DISTANCE OF WHERE THAT PLANE IS LOCATED)
+
+------------------------------------------
+In summary: The ultimate reason we do this is because these vectors are then used to calculate a plane:
+In order to calculate a plane, you only need 3 points in space:
+
+glm::normalize(glm::cross(p1-p0, p2-p1));
+    THIS tells the DIRECTION of the plane,
+
+BUT in order to finalize the plane, we also need the OFFSET, which is calculated via the dot product of the plane's normal (direction) AND some point within that plane.
+glm::dot(planeNormal, p0);
+    p0 is ARBITRARY: it can be ANY point on the plane.
+
+And in turn, you get a complete Plane struct: the offset, and the direction/normal.
+
+------
+
+The reason we do this is for our culling system:
+
+Distance = (Normal dotproduct. ObjectPosition) − Offset
+
+If distance is positive: object is past the wall we've established with the vectors -- CULL IT -- see: https://www.desmos.com/3d/zv3ucrneys
+If it's negative: the object is inside the wall, so don't cull it.
+
+The exact way to handle culling isn't yet explored, but see https://docs.vulkan.org/tutorial/latest/Building_a_Simple_Engine/Engine_Architecture/05_rendering_pipeline.html#_scene_culling
+for what the "pseudo code snippet" (ugh) does and try to mimic it. Just play around with it.
+
+=====================================

@@ -150,12 +150,58 @@ class TransformComponent : public Component
     // The Model matrix is right above.
 
 
+class CameraComponent;
+
+
+class Plane
+{
+    glm::vec3 normal;
+    float offset;
+};
+
+
+
+class Frustum
+{
+    const CameraComponent* camera;
+
+    // DITCH THIS: MAKE IT A VECTOR (PROBABLY AN ARRAY CAUSE A FRUSTUM ONLY HAS 6 PLANES) OF PLANES.
+    glm::vec3 farTopLeft;
+    glm::vec3 farTopRight;
+    glm::vec3 farBottomLeft;
+    glm::vec3 farBottomRight;
+
+    glm::vec3 nearTopLeft;
+    glm::vec3 nearTopRight;
+    glm::vec3 nearBottomLeft;
+    glm::vec3 nearBottomRight;
+
+
+    public:
+    Frustum() = default;
+    Frustum( const CameraComponent* cam ) : camera(cam) {}
+
+
+    void setCamera( const CameraComponent* cam )
+    {
+        camera = cam;
+    }
+
+    // https://stackoverflow.com/questions/13665932/calculating-the-viewing-frustum-in-a-3d-space
+    void getFrustum();
+};
+
+
 class CameraComponent : public Component //, public EventListener
 {
+    Frustum camFrustum;
+
+    public: // just i cba. fix this. solely for frustum's stuff instead of getters. fix it later.
     float fieldOfView = 90.0f;
     float aspectRatio = 16.0 / 9.0f;
     float nearPlane = 0.1f;
     float farPlane = 1000.0f;
+    // might be a better idea to move these members into frustum class?
 
     glm::mat4 viewMatrix = glm::mat4(11.0f);
     mutable glm::mat4 projectionMatrix = glm::mat4(.0f);
@@ -184,6 +230,10 @@ class CameraComponent : public Component //, public EventListener
     //     }
     // }
 
+    CameraComponent() { camFrustum.setCamera(this); }
+
+    void getCameraFrustum()
+    { camFrustum.getFrustum(); }
 
     void setPerspective( float fov, float aspect, float _near, float _far )
     {
@@ -205,7 +255,7 @@ class CameraComponent : public Component //, public EventListener
             glm::vec3 position = thisEntitysTransformComponent->GetPosition();
             glm::quat rotation = thisEntitysTransformComponent->GetRotation();
 
-            glm::vec3 forward = rotation * glm::vec3( 0.0f, 0.0f, 1.0f ); // Forward vector ( facing -Z ) -- +Z NOW!
+            glm::vec3 forward = rotation * glm::vec3( 0.0f, 0.0f, -1.0f ); // Forward vector ( facing -Z ) -- apparently standard in engines
             glm::vec3 up = rotation * glm::vec3( 0.0, 1.0f, 0.0f ); // Up vector ( +Y is up )
 
             return glm::lookAt( position, position + forward, up );
@@ -229,3 +279,90 @@ class CameraComponent : public Component //, public EventListener
         return projectionMatrix;
     }
 };
+
+
+
+inline void Frustum::getFrustum() // return frustum instead of void when finished.
+{
+    auto thisEntitysTransformComponent = camera->GetOwner()->GetComponent<TransformComponent>();
+
+    glm::vec3 position = thisEntitysTransformComponent->GetPosition();
+    glm::quat rotation = thisEntitysTransformComponent->GetRotation();
+
+    // If there's problems, check this out.
+    glm::vec3 forward = rotation * glm::vec3( 0.0f, 0.0f, -1.0f );
+    glm::vec3 upwards = rotation * glm::vec3( 0.0f, 1.0f, 0.0f );
+    glm::vec3 right = rotation * glm::vec3( 1.0f, 0.0f, 0.0f );
+
+    glm::vec3 nearCenter = position - forward * camera->nearPlane;
+    glm::vec3 farCenter = position - forward * camera->farPlane;
+
+    float nearHeight = 2 * tan( glm::radians(camera->fieldOfView) / 2) * camera->nearPlane;
+    float farHeight = 2 * tan( glm::radians(camera->fieldOfView) / 2) * camera->farPlane;
+    float nearWidth = nearHeight * camera->aspectRatio;
+    float farWidth = farHeight * camera->aspectRatio;
+
+    farTopLeft      = farCenter + upwards * (farHeight*0.5f) - right * (farWidth*0.5f);
+    farTopRight     = farCenter + upwards * (farHeight*0.5f) + right * (farWidth*0.5f);
+    farBottomLeft   = farCenter - upwards * (farHeight*0.5f) - right * (farWidth*0.5f);
+    farBottomRight  = farCenter - upwards * (farHeight*0.5f) + right * (farWidth*0.5f);
+
+    nearTopLeft     = nearCenter + upwards * (nearHeight*0.5f) - right * (nearWidth*0.5f);
+    nearTopRight    = nearCenter + upwards * (nearHeight*0.5f) + right * (nearWidth*0.5f);
+    nearBottomLeft  = nearCenter - upwards * (nearHeight*0.5f) - right * (nearWidth*0.5f);
+    nearBottomRight = nearCenter - upwards * (nearHeight*0.5f) + right * (nearWidth*0.5f);
+
+    std::cout << "Near Plane Center: (" << nearCenter.x << ", " << nearCenter.y << ", " << nearCenter.z << std::endl;
+    std::cout << "Far Plane Center: (" << farCenter.x << ", " << farCenter.y << ", " << farCenter.z << std::endl;
+
+    std::cout << "farTopLeft: (" << farTopLeft.x << ", " << farTopLeft.y << ", " << farTopLeft.z << ")" << std::endl;
+    std::cout << "farTopRight: (" << farTopRight.x << ", " << farTopRight.y << ", " << farTopRight.z << ")" << std::endl;
+    std::cout << "farBottomLeft: (" << farBottomLeft.x << ", " << farBottomLeft.y << ", " << farBottomLeft.z << ")" << std::endl;
+    std::cout << "farBottomRight: (" << farBottomRight.x << ", " << farBottomRight.y << ", " << farBottomRight.z << ")" << std::endl;
+
+    std::cout << "nearTopLeft: (" << nearTopLeft.x << ", " << nearTopLeft.y << ", " << nearTopLeft.z << ")" << std::endl;
+    std::cout << "nearTopRight: (" << nearTopRight.x << ", " << nearTopRight.y << ", " << nearTopRight.z << ")" << std::endl;
+    std::cout << "nearBottomLeft: (" << nearBottomLeft.x << ", " << nearBottomLeft.y << ", " << nearBottomLeft.z << ")" << std::endl;
+    std::cout << "nearBottomRight: (" << nearBottomRight.x << ", " << nearBottomRight.y << ", " << nearBottomRight.z << ")" << std::endl;
+
+
+    glm::vec3 p0, p1, p2;
+
+    // The PLANES walls (NOT THE EXACTLY THE NEAR OR FAR -- THE WALLS OF IT)
+    p0 = nearBottomLeft; p1 = farBottomLeft; p2 = farTopLeft;
+    glm::vec3 leftPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1));
+    float leftPlaneOffset = glm::dot(leftPlaneNormal, p0);
+
+    p0 = nearTopLeft; p1 = farTopLeft; p2 = farTopRight;
+    glm::vec3 topPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1));
+    float topPlaneOffset = glm::dot(topPlaneNormal , p0);
+
+    p0 = nearTopRight; p1 = farTopRight; p2 = farBottomRight;
+    glm::vec3 rightPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1));
+    float rightPlaneOffset = glm::dot(rightPlaneNormal , p0);
+
+    p0 = nearBottomRight; p1 = farBottomRight; p2 = farBottomLeft;
+    glm::vec3 bottomPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1));
+    float bottomPlaneOffset = glm::dot(bottomPlaneNormal , p0);
+
+
+    std::cout << "leftPlaneNormal: (" << leftPlaneNormal.x << ", " << leftPlaneNormal.y << ", " << leftPlaneNormal.z << ")" << " Offset: " << leftPlaneOffset << std::endl;
+    std::cout << "topPlaneNormal: (" << topPlaneNormal.x << ", " << topPlaneNormal.y << ", " << topPlaneNormal.z << ")" << " Offset: " << topPlaneOffset << std::endl;
+    std::cout << "rightPlaneNormal: (" << rightPlaneNormal.x << ", " << rightPlaneNormal.y << ", " << rightPlaneNormal.z << ")" << " Offset: " << rightPlaneOffset << std::endl;
+    std::cout << "bottomPlaneNormal: (" << bottomPlaneNormal.x << ", " << bottomPlaneNormal.y << ", " << bottomPlaneNormal.z << ")" << " Offset: " << bottomPlaneOffset << std::endl;
+
+
+    // These are the planes of the near/far itself.
+    p0 = nearBottomRight; p1 = nearBottomLeft; p2 = nearTopLeft; // SOME arbitrary points of the near. IT CAN BE ANYTHING.
+    glm::vec3 nearPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1)); // A PLANE IS 2 PARTS: FIRST, WE NEED THE PLANE'S NORMAL (FANCY WORD FOR DIRECTION)
+    float nearPlaneOffset = glm::dot( nearPlaneNormal, p2);  // AND THE SECOND PART IS THE OFFSET: WHICH IS GIVEN BY DOT PRODUCT OF THE PLANE'S NORMAL AND SOME ARBITRARY POINT ON THE PLANE.
+    std::cout << "nearPlaneNormal: (" << nearPlaneNormal.x << ", " << nearPlaneNormal.y << ", " << nearPlaneNormal.z << ")" << " Offset: " << nearPlaneOffset << std::endl;
+
+    p0 = farBottomRight; p1 = farBottomLeft; p2 = farTopLeft; // SAME THING, BUT FOR FAR:
+    glm::vec3 farPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1));
+    float farPlaneOffset = glm::dot(farPlaneNormal, farTopRight); // JUST to show off that it can be ANY point (technically p3 in this context!)
+    std::cout << "farPlaneNormal: (" << farPlaneNormal.x << ", " << farPlaneNormal.y << ", " << farPlaneNormal.z << ")" << " Offset: " << farPlaneOffset << std::endl;
+
+
+    // I presume we're gonna have to recalculate the frustum on EVERY rotation/movement of the camera. So... just a heads up when we finish up within runtime.cpp -- DON'T FORGET TO KEEP IT CONTINUALLY UPDATED.
+}

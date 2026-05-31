@@ -28,7 +28,6 @@ void RunTimeApplication::updateMVPUBOBuffer()
     mvpUBOBuffer mvpTransformationMatrix{};
 
     // Camera Rotation
-    float camera_rotation_side = ( held_q ? 1 : 0 ) + ( held_e ? -1 : 0);
     static float radians_side = 0.0f;
     int move_by = 0;
     if ( held_click && moving_cursor )
@@ -36,11 +35,10 @@ void RunTimeApplication::updateMVPUBOBuffer()
     radians_side += ( move_by / 1000000.0f );
     glm::quat rotaQuat_side = glm::angleAxis( glm::degrees( radians_side ), glm::vec3( 0.0f, 1.0f, 0.0f ) );
 
-    float camera_rotation_up = ( held_x ? -1 : 0 ) + ( held_c ? 1 : 0);
     static float radians_up = 0.0f;
     int shift_by = 0;
     if ( held_click && moving_cursor )
-        shift_by = current_cursor_position.y - cursor_clicked_at.y;
+        shift_by = cursor_clicked_at.y - current_cursor_position.y;
     radians_up += ( shift_by / 1000000.0f );
     glm::quat rotaQuat_up = glm::angleAxis( glm::degrees( radians_up ), glm::vec3( 1.0f, 0.0f, 0.0f ) );
 
@@ -50,9 +48,9 @@ void RunTimeApplication::updateMVPUBOBuffer()
 
     // Camera Position
     glm::vec3 movementVector(
-        ( held_a ? 1 : 0 ) + ( held_d ? -1 : 0 ),
+        ( held_a ? -1 : 0 ) + ( held_d ? 1 : 0 ),
         ( held_space ? 1 : 0 ) + ( held_ctrl ? -1 : 0 ),
-        ( held_w ? 1 : 0 ) + ( held_s ? -1 : 0 ) );
+        ( held_w ? -1 : 0 ) + ( held_s ? 1 : 0 ) );
     if ( glm::length( movementVector ) >= 1.0f )
         movementVector = glm::normalize( movementVector ); // Normalize it to have a length of 1 so we don't get that strafe thing where speed is faster when going sideways (Counter-strike's ladders!)
 
