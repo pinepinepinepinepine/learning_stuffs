@@ -73,6 +73,21 @@ class Component
         Entity* GetOwner() const { return owner; }
 };
 
+class BoundingComponent : public Component
+{
+    AABB_box boundingBox;
+
+    public:
+    BoundingComponent( AABB_box box ) : boundingBox(box)
+    {
+        std::cout << "Bounding Box Created: (" << boundingBox.min.x << "x, " << boundingBox.min.y << "y, " << boundingBox.min.z << "z) -> ("
+        << boundingBox.max.x << "x, " << boundingBox.max.y << "y, " << boundingBox.max.z << "z)\n";
+    }
+};
+
+
+
+
 // raw model data: the texture and the mesh (vertex and index buffers)
 class ModelComponent : public Component
 {

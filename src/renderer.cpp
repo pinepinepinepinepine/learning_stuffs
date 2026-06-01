@@ -57,7 +57,8 @@ void RenderApplication::createModels()
     auto catModel = std::make_unique<ModelData>();
     const char* catFilepath = "../models/spin.obj";
 
-    catModel->loadModel( device, catFilepath ); // Maybe make loadModel return it directly instead of needing to make a separate variable?
+    // Probably a really good idea to ship some logic from createCatEntity (specifically about model components) into here.
+    cat.addComponent<BoundingComponent>( catModel->loadModel( device, catFilepath ) ); // Maybe make loadModel return it directly instead of needing to make a separate variable?
     catModelHandle = modelManager.addResource( hashString( catFilepath ), std::move(catModel) );
 }
 

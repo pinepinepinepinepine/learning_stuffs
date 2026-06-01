@@ -1,6 +1,6 @@
 #include "../headers/model.hpp"
 
-void ModelData::loadModel( const LogicalDevice& device, const char *filename )
+AABB_box ModelData::loadModel( const LogicalDevice& device, const char *filename )
 {
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
@@ -9,6 +9,13 @@ void ModelData::loadModel( const LogicalDevice& device, const char *filename )
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
+
+    float min_x = std::numeric_limits<float>::max();
+    float max_x = std::numeric_limits<float>::min();
+    float min_y = std::numeric_limits<float>::max();
+    float max_y = std::numeric_limits<float>::min();
+    float min_z = std::numeric_limits<float>::max();
+    float max_z = std::numeric_limits<float>::min();
 
     bool obj_result = tinyobj::LoadObj( &attrib, &shapes, &materials, &err, filename );
     if ( !obj_result )
@@ -38,6 +45,13 @@ void ModelData::loadModel( const LogicalDevice& device, const char *filename )
             {
                 uniqueVertices[vertex] = static_cast<uint32_t>( vertices.size() );
                 vertices.push_back(vertex);
+
+                if ( vertex.pos.x < min_x ) min_x = vertex.pos.x;
+                if ( vertex.pos.x > max_x ) max_x = vertex.pos.x;
+                if ( vertex.pos.y < min_y ) min_y = vertex.pos.y;
+                if ( vertex.pos.y > max_y ) max_y = vertex.pos.y;
+                if ( vertex.pos.z < min_z ) min_z = vertex.pos.z;
+                if ( vertex.pos.z > max_z ) max_z = vertex.pos.z;
             }
             indices.push_back( uniqueVertices[vertex] );
         }
@@ -60,4 +74,6 @@ void ModelData::loadModel( const LogicalDevice& device, const char *filename )
         false );
     indexBuffer.muleBuffer( device, indices );
     indices_count = indices.size();
+
+    return AABB_box( glm::vec3(min_x, min_y, min_z), glm::vec3(max_x, max_y, max_z) );
 }
