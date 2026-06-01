@@ -168,10 +168,27 @@ class TransformComponent : public Component
 class CameraComponent;
 
 
-class Plane
+struct Plane
 {
     glm::vec3 normal;
     float offset;
+
+    Plane() = default;
+    Plane( glm::vec3 p0, glm::vec3 p1, glm::vec3 p2 )
+    {
+        // A PLANE IS 2 PARTS: FIRST, WE NEED THE PLANE'S NORMAL (FANCY WORD FOR DIRECTION)
+        // AND THE SECOND PART IS THE OFFSET: WHICH IS GIVEN BY DOT PRODUCT OF THE PLANE'S NORMAL AND SOME ARBITRARY (doesnt have to be p0/p1/p2) POINT ON THE PLANE.
+        normal = glm::normalize(glm::cross(p1-p0, p2-p1)); // SOME arbitrary points of the plane we're creating. IT CAN BE ANYTHING.
+        offset = glm::dot(normal, p0);
+
+        std::cout << "Plane Creation: (" << normal.x << ", " << normal.y << ", " << normal.z << ")" << " Offset: " << offset << std::endl;
+        // One thing to ensure: check math.txt about culling rules: ensure the p0, p1,and p2 are ALL either COUNTER CLOCKWISE or CLOCKWISE across all
+        // this is because for our culling logic, we want to ensure we can use the same logic of "Greater than the plane's offset is culled or rendered"
+        // The way to check is visualize if the points from p0 -> p1 -> p2 -> p0 is clockwise/counterclockwise: if it's counterclockwise, it's OUTWARD, so greater than 0 distance is culled.
+
+        // I presume we're gonna have to recalculate the frustum on EVERY rotation/movement of the camera. So... just a heads up when we finish up within runtime.cpp -- DON'T FORGET TO KEEP IT CONTINUALLY UPDATED.
+    }
+
 };
 
 
@@ -180,16 +197,7 @@ class Frustum
 {
     const CameraComponent* camera;
 
-    // DITCH THIS: MAKE IT A VECTOR (PROBABLY AN ARRAY CAUSE A FRUSTUM ONLY HAS 6 PLANES) OF PLANES.
-    glm::vec3 farTopLeft;
-    glm::vec3 farTopRight;
-    glm::vec3 farBottomLeft;
-    glm::vec3 farBottomRight;
-
-    glm::vec3 nearTopLeft;
-    glm::vec3 nearTopRight;
-    glm::vec3 nearBottomLeft;
-    glm::vec3 nearBottomRight;
+    std::array<Plane, 6> frustumPlanes;
 
 
     public:
@@ -202,8 +210,16 @@ class Frustum
         camera = cam;
     }
 
+    void setPlanes( std::array<Plane, 6> planes )
+    {
+        frustumPlanes = planes;
+    }
+
+    std::array<Plane, 6>& getFrustumPlanes()
+    { return frustumPlanes; }
+
     // https://stackoverflow.com/questions/13665932/calculating-the-viewing-frustum-in-a-3d-space
-    void getFrustum();
+    void createFrustum();
 };
 
 
@@ -247,8 +263,11 @@ class CameraComponent : public Component //, public EventListener
 
     CameraComponent() { camFrustum.setCamera(this); }
 
-    void getCameraFrustum()
-    { camFrustum.getFrustum(); }
+    Frustum& createCameraFrustum()
+    {
+        camFrustum.createFrustum();
+        return camFrustum;
+    }
 
     void setPerspective( float fov, float aspect, float _near, float _far )
     {
@@ -297,9 +316,12 @@ class CameraComponent : public Component //, public EventListener
 
 
 
-inline void Frustum::getFrustum() // return frustum instead of void when finished.
+inline void Frustum::createFrustum()
 {
     auto thisEntitysTransformComponent = camera->GetOwner()->GetComponent<TransformComponent>();
+
+    if ( !thisEntitysTransformComponent )
+        throw std::runtime_error("Could not create a frustum for the camera because the camera's entity does not have a transform component.");
 
     glm::vec3 position = thisEntitysTransformComponent->GetPosition();
     glm::quat rotation = thisEntitysTransformComponent->GetRotation();
@@ -317,70 +339,22 @@ inline void Frustum::getFrustum() // return frustum instead of void when finishe
     float nearWidth = nearHeight * camera->aspectRatio;
     float farWidth = farHeight * camera->aspectRatio;
 
-    farTopLeft      = farCenter + upwards * (farHeight*0.5f) - right * (farWidth*0.5f);
-    farTopRight     = farCenter + upwards * (farHeight*0.5f) + right * (farWidth*0.5f);
-    farBottomLeft   = farCenter - upwards * (farHeight*0.5f) - right * (farWidth*0.5f);
-    farBottomRight  = farCenter - upwards * (farHeight*0.5f) + right * (farWidth*0.5f);
+    glm::vec3 farTopLeft      = farCenter + upwards * (farHeight*0.5f) - right * (farWidth*0.5f);
+    glm::vec3 farTopRight     = farCenter + upwards * (farHeight*0.5f) + right * (farWidth*0.5f);
+    glm::vec3 farBottomLeft   = farCenter - upwards * (farHeight*0.5f) - right * (farWidth*0.5f);
+    glm::vec3 farBottomRight  = farCenter - upwards * (farHeight*0.5f) + right * (farWidth*0.5f);
 
-    nearTopLeft     = nearCenter + upwards * (nearHeight*0.5f) - right * (nearWidth*0.5f);
-    nearTopRight    = nearCenter + upwards * (nearHeight*0.5f) + right * (nearWidth*0.5f);
-    nearBottomLeft  = nearCenter - upwards * (nearHeight*0.5f) - right * (nearWidth*0.5f);
-    nearBottomRight = nearCenter - upwards * (nearHeight*0.5f) + right * (nearWidth*0.5f);
+    glm::vec3 nearTopLeft     = nearCenter + upwards * (nearHeight*0.5f) - right * (nearWidth*0.5f);
+    glm::vec3 nearTopRight    = nearCenter + upwards * (nearHeight*0.5f) + right * (nearWidth*0.5f);
+    glm::vec3 nearBottomLeft  = nearCenter - upwards * (nearHeight*0.5f) - right * (nearWidth*0.5f);
+    glm::vec3 nearBottomRight = nearCenter - upwards * (nearHeight*0.5f) + right * (nearWidth*0.5f);
 
-    std::cout << "Near Plane Center: (" << nearCenter.x << ", " << nearCenter.y << ", " << nearCenter.z << std::endl;
-    std::cout << "Far Plane Center: (" << farCenter.x << ", " << farCenter.y << ", " << farCenter.z << std::endl;
-
-    std::cout << "farTopLeft: (" << farTopLeft.x << ", " << farTopLeft.y << ", " << farTopLeft.z << ")" << std::endl;
-    std::cout << "farTopRight: (" << farTopRight.x << ", " << farTopRight.y << ", " << farTopRight.z << ")" << std::endl;
-    std::cout << "farBottomLeft: (" << farBottomLeft.x << ", " << farBottomLeft.y << ", " << farBottomLeft.z << ")" << std::endl;
-    std::cout << "farBottomRight: (" << farBottomRight.x << ", " << farBottomRight.y << ", " << farBottomRight.z << ")" << std::endl;
-
-    std::cout << "nearTopLeft: (" << nearTopLeft.x << ", " << nearTopLeft.y << ", " << nearTopLeft.z << ")" << std::endl;
-    std::cout << "nearTopRight: (" << nearTopRight.x << ", " << nearTopRight.y << ", " << nearTopRight.z << ")" << std::endl;
-    std::cout << "nearBottomLeft: (" << nearBottomLeft.x << ", " << nearBottomLeft.y << ", " << nearBottomLeft.z << ")" << std::endl;
-    std::cout << "nearBottomRight: (" << nearBottomRight.x << ", " << nearBottomRight.y << ", " << nearBottomRight.z << ")" << std::endl;
-
-
-    glm::vec3 p0, p1, p2;
-
-    // The PLANES walls (NOT THE EXACTLY THE NEAR OR FAR -- THE WALLS OF IT)
-    p0 = nearBottomLeft; p1 = farBottomLeft; p2 = farTopLeft;
-    glm::vec3 leftPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1));
-    float leftPlaneOffset = glm::dot(leftPlaneNormal, p0);
-
-    p0 = nearTopLeft; p1 = farTopLeft; p2 = farTopRight;
-    glm::vec3 topPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1));
-    float topPlaneOffset = glm::dot(topPlaneNormal , p0);
-
-    p0 = nearTopRight; p1 = farTopRight; p2 = farBottomRight;
-    glm::vec3 rightPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1));
-    float rightPlaneOffset = glm::dot(rightPlaneNormal , p0);
-
-    p0 = nearBottomRight; p1 = farBottomRight; p2 = farBottomLeft;
-    glm::vec3 bottomPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1));
-    float bottomPlaneOffset = glm::dot(bottomPlaneNormal , p0);
-
-
-    std::cout << "leftPlaneNormal: (" << leftPlaneNormal.x << ", " << leftPlaneNormal.y << ", " << leftPlaneNormal.z << ")" << " Offset: " << leftPlaneOffset << std::endl;
-    std::cout << "topPlaneNormal: (" << topPlaneNormal.x << ", " << topPlaneNormal.y << ", " << topPlaneNormal.z << ")" << " Offset: " << topPlaneOffset << std::endl;
-    std::cout << "rightPlaneNormal: (" << rightPlaneNormal.x << ", " << rightPlaneNormal.y << ", " << rightPlaneNormal.z << ")" << " Offset: " << rightPlaneOffset << std::endl;
-    std::cout << "bottomPlaneNormal: (" << bottomPlaneNormal.x << ", " << bottomPlaneNormal.y << ", " << bottomPlaneNormal.z << ")" << " Offset: " << bottomPlaneOffset << std::endl;
-
-
-    // These are the planes of the near/far itself.
-    p0 = nearBottomRight; p1 = nearBottomLeft; p2 = nearTopLeft; // SOME arbitrary points of the near. IT CAN BE ANYTHING.
-    glm::vec3 nearPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1)); // A PLANE IS 2 PARTS: FIRST, WE NEED THE PLANE'S NORMAL (FANCY WORD FOR DIRECTION)
-    float nearPlaneOffset = glm::dot( nearPlaneNormal, p2);  // AND THE SECOND PART IS THE OFFSET: WHICH IS GIVEN BY DOT PRODUCT OF THE PLANE'S NORMAL AND SOME ARBITRARY POINT ON THE PLANE.
-    std::cout << "nearPlaneNormal: (" << nearPlaneNormal.x << ", " << nearPlaneNormal.y << ", " << nearPlaneNormal.z << ")" << " Offset: " << nearPlaneOffset << std::endl;
-
-    p0 = farBottomLeft; p1 = farBottomRight; p2 = farTopLeft; // SAME THING, BUT FOR FAR:
-    glm::vec3 farPlaneNormal = glm::normalize(glm::cross(p1-p0, p2-p1));
-    float farPlaneOffset = glm::dot(farPlaneNormal, farTopRight); // JUST to show off that it can be ANY point (technically p3 in this context!)
-    std::cout << "farPlaneNormal: (" << farPlaneNormal.x << ", " << farPlaneNormal.y << ", " << farPlaneNormal.z << ")" << " Offset: " << farPlaneOffset << std::endl;
-
-    // One thing to ensure: check math.txt about culling rules: ensure the p0, p1,and p2 are ALL either COUNTER CLOCKWISE or CLOCKWISE across all
-    // this is because for our culling logic, we want to ensure we can use the same logic of "Greater than the plane's offset is culled or rendered"
-    // The way to check is visualize if the points from p0 -> p1 -> p2 -> p0 is clockwise/counterclockwise: if it's counterclockwise, it's OUTWARD, so greater than 0 distance is culled.
-
-    // I presume we're gonna have to recalculate the frustum on EVERY rotation/movement of the camera. So... just a heads up when we finish up within runtime.cpp -- DON'T FORGET TO KEEP IT CONTINUALLY UPDATED.
+    setPlanes( {
+        Plane( nearBottomLeft, farBottomLeft, farTopLeft ), // following 4 planes are walls
+        Plane( nearTopLeft, farTopLeft, farTopRight ),
+        Plane( nearTopRight, farTopRight, farBottomRight ),
+        Plane( nearBottomRight, farBottomRight, farBottomLeft ),
+        Plane( nearBottomRight, nearBottomLeft, nearTopLeft ), // near plane
+        Plane( farBottomLeft, farBottomRight, farTopLeft ), // far plane
+    } );
 }

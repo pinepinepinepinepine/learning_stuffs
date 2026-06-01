@@ -77,10 +77,7 @@ void RenderApplication::createCatEntity()
     camera.GetComponent<CameraComponent>()->setPerspective( 50.0f, 16.0 / 9.0f, 0.1f, 1000.0f );
 
 
-
-    // Delete this later. just testing it here cause it's convenient:
-
-    camera.GetComponent<CameraComponent>()->getCameraFrustum();
+    Frustum& frustum = camera.GetComponent<CameraComponent>()->createCameraFrustum();
 }
 
 void RenderApplication::cleanup()
