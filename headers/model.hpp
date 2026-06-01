@@ -11,6 +11,21 @@ struct AABB_box
     glm::vec3 max;
 
     AABB_box( glm::vec3 _min, glm::vec3 _max ) : min(_min), max(_max) {}
+
+    std::array<glm::vec3, 8> getBoxCorners() const
+    {
+        std::array<glm::vec3, 8> corners {
+            min,
+            { max.x, min.y, min.z },
+            { min.x, max.y, min.z },
+            { max.x, max.y, min.z },
+            { min.x, min.y, max.z },
+            { min.x, max.y, max.z },
+            { max.x, min.y, max.z },
+            max
+        };
+        return corners;
+    }
 };
 
 struct ModelData

@@ -1,5 +1,6 @@
 //#include "component.hpp"
 #include "../../headers/includes.hpp"
+#include "../../headers/model.hpp"
 #include "events.hpp"
 
 
@@ -83,6 +84,28 @@ class BoundingComponent : public Component
         std::cout << "Bounding Box Created: (" << boundingBox.min.x << "x, " << boundingBox.min.y << "y, " << boundingBox.min.z << "z) -> ("
         << boundingBox.max.x << "x, " << boundingBox.max.y << "y, " << boundingBox.max.z << "z)\n";
     }
+
+
+    AABB_box transform( glm::mat4 transformMatrix )
+    {
+
+        // matrix[column][row]
+        // std::cout << "ROW 0: (" << transformMatrix[0][0] << "x, " << transformMatrix[1][0] << "y, " << transformMatrix[2][0] << "z, " << transformMatrix[3][0] << "w)" << std::endl;
+        // std::cout << "ROW 1: (" << transformMatrix[0][1] << "x, " << transformMatrix[1][1] << "y, " << transformMatrix[2][1] << "z, " << transformMatrix[3][1] << "w)" << std::endl;
+        // std::cout << "ROW 2: (" << transformMatrix[0][2] << "x, " << transformMatrix[1][2] << "y, " << transformMatrix[2][2] << "z, " << transformMatrix[3][2] << "w)" << std::endl;
+        // std::cout << "ROW 3: (" << transformMatrix[0][3] << "x, " << transformMatrix[1][3] << "y, " << transformMatrix[2][3] << "z, " << transformMatrix[3][3] << "w)" << std::endl;
+
+        // std::cout << "Old Min: (" << boundingBox.min.x << "x, " << boundingBox.min.y << "y, " << boundingBox.min.z << "z)" << std::endl;
+        // std::cout << "Old Max: (" << boundingBox.max.x << "x, " << boundingBox.max.y << "y, " << boundingBox.max.z << "z)" << std::endl;
+
+        AABB_box transformedBox( transformMatrix * glm::vec4(boundingBox.min, 1.0f), transformMatrix * glm::vec4(boundingBox.max, 1.0f) );
+
+        // std::cout << "NEW Min: (" << transformedBox.min.x << "x, " << transformedBox.min.y << "y, " << transformedBox.min.z << "z)" << std::endl;
+        // std::cout << "NEW Max: (" << transformedBox.max.x << "x, " << transformedBox.max.y << "y, " << transformedBox.max.z << "z)\n" << std::endl;
+
+        return transformedBox;
+    }
+
 };
 
 
@@ -181,7 +204,7 @@ struct Plane
         normal = glm::normalize(glm::cross(p1-p0, p2-p1)); // SOME arbitrary points of the plane we're creating. IT CAN BE ANYTHING.
         offset = glm::dot(normal, p0);
 
-        std::cout << "Plane Creation: (" << normal.x << ", " << normal.y << ", " << normal.z << ")" << " Offset: " << offset << std::endl;
+        //std::cout << normal.x << "x + " << normal.y << "y + " << normal.z << "z = " << offset << std::endl;
         // One thing to ensure: check math.txt about culling rules: ensure the p0, p1,and p2 are ALL either COUNTER CLOCKWISE or CLOCKWISE across all
         // this is because for our culling logic, we want to ensure we can use the same logic of "Greater than the plane's offset is culled or rendered"
         // The way to check is visualize if the points from p0 -> p1 -> p2 -> p0 is clockwise/counterclockwise: if it's counterclockwise, it's OUTWARD, so greater than 0 distance is culled.
@@ -220,6 +243,32 @@ class Frustum
 
     // https://stackoverflow.com/questions/13665932/calculating-the-viewing-frustum-in-a-3d-space
     void createFrustum();
+
+    // If true: Render it; if false: Cull it. Outward Plane Normals.
+    bool isBoxWithinFrustum( const AABB_box& box )
+    {
+        std::array<glm::vec3, 8> corners = box.getBoxCorners();
+        // APPARENTLY: you don't need to check EVERY corner for EVERY plane. you can just check ONE through some logic.
+            // FIGURE. IT. OUT.
+
+        for ( const auto& corner : corners )
+        {
+            int outsideCorners = 0;
+            for ( const auto& plane : frustumPlanes )
+            {
+                float distance = ( glm::dot( plane.normal, corner ) ) - plane.offset;
+
+                if ( distance > 0 )
+                    outsideCorners++;
+            }
+
+            if ( outsideCorners >= 6 )
+                return true;
+
+        }
+        return false;
+    }
+
 };
 
 
@@ -263,11 +312,15 @@ class CameraComponent : public Component //, public EventListener
 
     CameraComponent() { camFrustum.setCamera(this); }
 
-    Frustum& createCameraFrustum()
+    Frustum& updateCameraFrustum()
     {
         camFrustum.createFrustum();
         return camFrustum;
     }
+
+    // Keeping this in but it's kinda dead. also the AABB_box's calculate 8 corners thing is useless, so remove it.
+    Frustum& getCameraFrustum()
+    { return camFrustum; }
 
     void setPerspective( float fov, float aspect, float _near, float _far )
     {
@@ -326,13 +379,12 @@ inline void Frustum::createFrustum()
     glm::vec3 position = thisEntitysTransformComponent->GetPosition();
     glm::quat rotation = thisEntitysTransformComponent->GetRotation();
 
-    // If there's problems, check this out.
     glm::vec3 forward = rotation * glm::vec3( 0.0f, 0.0f, -1.0f );
     glm::vec3 upwards = rotation * glm::vec3( 0.0f, 1.0f, 0.0f );
     glm::vec3 right = rotation * glm::vec3( 1.0f, 0.0f, 0.0f );
 
-    glm::vec3 nearCenter = position - forward * camera->nearPlane;
-    glm::vec3 farCenter = position - forward * camera->farPlane;
+    glm::vec3 nearCenter = position + forward * camera->nearPlane;
+    glm::vec3 farCenter = position + forward * camera->farPlane;
 
     float nearHeight = 2 * tan( glm::radians(camera->fieldOfView) / 2) * camera->nearPlane;
     float farHeight = 2 * tan( glm::radians(camera->fieldOfView) / 2) * camera->farPlane;

@@ -124,7 +124,7 @@ Why? We can check whether or not a point lies on the plane by plugging in its co
 
     ***USE THE DESMOS GRAPH TO CHECK POINTS YOURSELF AS A VISUALIZER***
 
-Distance = (Normal dotproduct. ObjectPosition) − Offset
+Distance = (Normal dotproduct. ObjectPosition) - Offset
 
 > dot product( 0x + -0.906308y + 0.422618z, 10, 60, 50 ) = -33.24758
     aka: 0(10) + -0.906308(60) + 0.422618(50) = -33.24758

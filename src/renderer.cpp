@@ -21,6 +21,10 @@ void RenderApplication::setup()
 
     createCatEntity();
 
+    allEntities.push_back( &cat );
+
+    cullSystem.setCamera( camera.GetComponent<CameraComponent>() );
+
     createMVPUBOBuffers();
     createParticleComputeBuffers();
     createDebugBuffers();
@@ -75,9 +79,6 @@ void RenderApplication::createCatEntity()
     camera.GetComponent<TransformComponent>()->SetRotation( { 0.0f, 0.0f, -1.0f, 0.0f } );
     camera.addComponent<CameraComponent>();
     camera.GetComponent<CameraComponent>()->setPerspective( 50.0f, 16.0 / 9.0f, 0.1f, 1000.0f );
-
-
-    Frustum& frustum = camera.GetComponent<CameraComponent>()->createCameraFrustum();
 }
 
 void RenderApplication::cleanup()

@@ -336,6 +336,12 @@ void RunTimeApplication::drawFrame()
     updateMVPUBOBuffer();
     updateParticleBuffer();
 
+    glm::vec3 guh = app->camera.GetComponent<TransformComponent>()->GetPosition();
+
+    //std::cout << "("<< guh.x << ", " << guh.y << ", " << guh.z << ")\n";
+
+    app->cullSystem.CullScene( app->allEntities );
+
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].begin({});
 
     app->threadManager.signalThreadsToWork();
