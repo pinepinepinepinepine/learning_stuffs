@@ -172,11 +172,59 @@ void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
 }
 
+void RunTimeApplication::recordBoundingCommandBuffer( uint32_t currentImageIndex )
+{
+    // turn this this copy and pasted big block into a function.
+    vk::RenderingAttachmentInfo colourAttachmentInfo {
+        .imageView          = app->colourImage.imageView,
+        .imageLayout        = vk::ImageLayout::eColorAttachmentOptimal,
+        .resolveMode        = vk::ResolveModeFlagBits::eAverage,
+        .resolveImageView   = app->swapChain.swapChainImages[currentImageIndex].imageView,
+        .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+        .loadOp             = vk::AttachmentLoadOp::eLoad,
+        .storeOp            = vk::AttachmentStoreOp::eStore };
+
+    vk::RenderingAttachmentInfo depthAttachmentInfo {
+        .imageView          = app->depthImage.imageView,
+        .imageLayout        = vk::ImageLayout::eDepthAttachmentOptimal,
+        .loadOp             = vk::AttachmentLoadOp::eLoad,
+        .storeOp            = vk::AttachmentStoreOp::eStore };
+
+    vk::RenderingInfo renderingInfo {
+        .renderArea           = { .offset = { 0, 0 }, .extent = app->swapChain.imageResolution },
+        .layerCount           = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments    = &colourAttachmentInfo,
+        .pDepthAttachment     = &depthAttachmentInfo };
+
+    BoundingComponent* bound = app->cat.GetComponent<BoundingComponent>();
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].beginRendering( renderingInfo );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindPipeline( vk::PipelineBindPoint::eGraphics, app->wireframePipeline.pipeline );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindVertexBuffers(0, *bound->visualBox.get()->vertexBuffer.gpuBuffer, {0} ); // maybe make a resource handle for the bounding?
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindIndexBuffer( *bound->visualBox.get()->indexBuffer.gpuBuffer, 0, vk::IndexType::eUint32 );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindDescriptorSets(
+       vk::PipelineBindPoint::eGraphics, app->wireframePipeline.pipelineLayout, 0, *app->wireframeDescriptors.descriptorSets[executingCommandBufferIndex], nullptr );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].drawIndexed( bound->visualBox.get()->indices_count, 1, 0, 0, 0 );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
+}
+
 void RunTimeApplication::updateParticleBuffer()
 {
     ParticleTime particleTime;
     particleTime.deltaTime = static_cast<float>(lastFrameTime) * 2.0f;
     memcpy( app->particle_storageBuffers_uboMule[executingCommandBufferIndex].gpuBufferMapped, &particleTime, sizeof(particleTime) );
+}
+
+void RunTimeApplication::updateWireMVPUBOBuffer()
+{
+    mvpUBOBuffer mvpTransformationMatrix{};
+
+    mvpTransformationMatrix.model = app->cat.GetComponent<TransformComponent>()->GetTransformMatrix();
+    mvpTransformationMatrix.view = app->camera.GetComponent<CameraComponent>()->getViewMatrix();
+    mvpTransformationMatrix.proj = app->camera.GetComponent<CameraComponent>()->getProjectionMatrix();
+    mvpTransformationMatrix.proj[1][1] *= -1;
+
+    memcpy( app->wireframe_mvp_uboBuffers[executingCommandBufferIndex].gpuBufferMapped, &mvpTransformationMatrix, sizeof(mvpTransformationMatrix) );
 }
 
 void RunTimeApplication::recordParticleComputeCommandBuffer( const vk::raii::CommandBuffer& threadCommandBuffer, const ParticleGroup& pushConstantParticleGroup )
@@ -231,7 +279,7 @@ void RunTimeApplication::recordParticleGraphicCommandBuffer( uint32_t currentIma
        0, { app->particle_storageBuffers_currentFrame[executingCommandBufferIndex].gpuBuffer }, {0} );
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindDescriptorSets(
         vk::PipelineBindPoint::eGraphics, app->particleGraphicPipeline.pipelineLayout, 0, *app->particleGraphicDescriptors.descriptorSets[executingCommandBufferIndex], nullptr );
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].draw(PARTICLE_COUNT, 1, 0, 0 );
+    //app->cmdBuffers.commandBuffers[executingCommandBufferIndex].draw(PARTICLE_COUNT, 1, 0, 0 );
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
 }
 
@@ -335,6 +383,7 @@ void RunTimeApplication::drawFrame()
 
     updateMVPUBOBuffer();
     updateParticleBuffer();
+    updateWireMVPUBOBuffer();
 
     glm::vec3 guh = app->camera.GetComponent<TransformComponent>()->GetPosition();
 
@@ -347,6 +396,8 @@ void RunTimeApplication::drawFrame()
     app->threadManager.signalThreadsToWork();
 
     recordCatCommandBuffer( imageIndex );
+
+    recordBoundingCommandBuffer( imageIndex );
 
     app->threadManager.waitForthreadsToCompleteWork();
 

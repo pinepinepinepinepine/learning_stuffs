@@ -33,12 +33,14 @@ class CullingSystem
             auto boundingComponent = entity->GetComponent<BoundingComponent>();
             if ( !boundingComponent ) throw std::runtime_error("Culling: bounding component is nullptr.");; // In the tutorial, it isn't a compotent, but I think it's neater like this.
 
+            // THIS IS NOT GOOD ENOUGH.
             AABB_box box = boundingComponent->transform( transformComponent->GetTransformMatrix() );
 
-            if ( frustum.isBoxWithinFrustum( box ) )
-                std::cout << "RENDERING!\n";
-            else
-                std::cout << "culled.\n";
+            frustum.isBoxWithinFrustum( box );
+            // if ( frustum.isBoxWithinFrustum( box ) )
+            //     std::cout << "RENDERING!\n";
+            // else
+            //     std::cout << "culled.\n";
         }
 
     }

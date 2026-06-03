@@ -119,3 +119,28 @@ endfunction()
 
 add_slang_compute_shader_target( compute_shaders )
 add_dependencies(main compute_shaders)
+
+
+function (add_slang_wireframe_shader_target TARGET)
+  cmake_parse_arguments ("SHADER" "" "" "SOURCES" ${ARGN})
+  set (SHADERS_DIR ${CMAKE_CURRENT_LIST_DIR}/shaders)
+  set (ENTRY_POINTS -entry vertMain -entry fragMain)
+  set (SHADER_SOURCES ${SHADERS_DIR}/wireframe.slang)
+  add_custom_command (
+          OUTPUT ${SHADERS_DIR}
+          COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADERS_DIR}
+  )
+  add_custom_command (
+          OUTPUT  ${SHADERS_DIR}/wireframe.spv
+          COMMAND cmd /c ${SHADERS_DIR}/compile.bat # for some reason the slang compiler below is... whatever.
+          COMMAND "${SLANG}/bin/slangc.exe" ${SHADER_SOURCES} -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o ${SHADERS_DIR}/wireframe.spv
+          WORKING_DIRECTORY ${SHADERS_DIR}
+          DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
+          COMMENT "Compiling Slang Wireframe raphic Shaders"
+          VERBATIM
+  )
+  add_custom_target (${TARGET} DEPENDS ${SHADERS_DIR}/wireframe.spv)
+endfunction()
+
+add_slang_wireframe_shader_target( wireframe_shaders )
+add_dependencies(main wireframe_shaders)

@@ -38,6 +38,7 @@ struct RenderApplication
     Descriptor descriptors;
     Descriptor particleComputeDescriptors;
     Descriptor particleGraphicDescriptors;
+    Descriptor wireframeDescriptors;
 
     std::vector<GPUBuffer> mvp_uboBuffers;
     std::vector<GPUBuffer> debug_uboBuffers;
@@ -45,6 +46,7 @@ struct RenderApplication
     std::vector<GPUBuffer> particle_storageBuffers_uboMule;
     std::vector<GPUBuffer> particle_debugComputeBuffers;
     std::vector<GPUBuffer> particle_debugGraphicsBuffers;
+    std::vector<GPUBuffer> wireframe_mvp_uboBuffers;
 
     SwapChain swapChain;
     Image colourImage;
@@ -53,6 +55,7 @@ struct RenderApplication
     Pipeline graphicPipeline;
     Pipeline particleGraphicPipeline;
     Pipeline particleComputePipeline;
+    Pipeline wireframePipeline;
 
     ThreadManager threadManager;
 
@@ -73,15 +76,18 @@ struct RenderApplication
     void createVertexGraphicsPipeline();
     void createParticleGraphicsPipeline();
     void createParticleComputePipeline();
+    void createWireframeGraphicsPipeline();
     void createCommandPools();
     void createMVPUBOBuffers();
     void createDebugBuffers();
+    void createWireframeMVPUBOBuffers();
     void createParticleComputeBuffers();
     vk::raii::Sampler createTextureSampler();
     void createAttachmentImages();
     void createDescriptorPool();
     void createModelDescriptors();
     void createParticleDescriptors();
+    void createWireframeDescriptors();
     void cleanup();
 
     void createThreads();

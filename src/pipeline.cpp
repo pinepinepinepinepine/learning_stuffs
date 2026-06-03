@@ -75,6 +75,7 @@ vk::PipelineMultisampleStateCreateInfo Pipeline::createMultisampling( vk::Sample
     return multisamplingCreateInfo;
 }
 
+// Make this customizable per pipeline instead of hardcoded like this.
 vk::PipelineDepthStencilStateCreateInfo Pipeline::createDepthStencil()
 {
     // ADD THIS GARBAGE BACK

@@ -7,7 +7,7 @@ AABB_box ModelData::loadModel( const LogicalDevice& device, const char *filename
     std::vector<tinyobj::material_t> materials;
     std::string err;
 
-    std::vector<Vertex> vertices;
+    std::vector<TextureVertex> vertices;
     std::vector<uint32_t> indices;
 
     float min_x = std::numeric_limits<float>::max();
@@ -21,15 +21,15 @@ AABB_box ModelData::loadModel( const LogicalDevice& device, const char *filename
     if ( !obj_result )
         throw std::runtime_error(err);
 
-    std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+    std::unordered_map<TextureVertex, uint32_t> uniqueVertices{};
 
     for ( const auto& shape : shapes )
     {
         for (const auto& index : shape.mesh.indices )
         {
-            Vertex vertex{};
+            TextureVertex vertex{};
 
-            vertex.pos = {
+            vertex.base = glm::vec3{
                 attrib.vertices[3 * index.vertex_index + 0],
                 attrib.vertices[3 * index.vertex_index + 1],
                 attrib.vertices[3 * index.vertex_index + 2]
@@ -46,12 +46,12 @@ AABB_box ModelData::loadModel( const LogicalDevice& device, const char *filename
                 uniqueVertices[vertex] = static_cast<uint32_t>( vertices.size() );
                 vertices.push_back(vertex);
 
-                if ( vertex.pos.x < min_x ) min_x = vertex.pos.x;
-                if ( vertex.pos.x > max_x ) max_x = vertex.pos.x;
-                if ( vertex.pos.y < min_y ) min_y = vertex.pos.y;
-                if ( vertex.pos.y > max_y ) max_y = vertex.pos.y;
-                if ( vertex.pos.z < min_z ) min_z = vertex.pos.z;
-                if ( vertex.pos.z > max_z ) max_z = vertex.pos.z;
+                if ( vertex.base.pos.x < min_x ) min_x = vertex.base.pos.x;
+                if ( vertex.base.pos.x > max_x ) max_x = vertex.base.pos.x;
+                if ( vertex.base.pos.y < min_y ) min_y = vertex.base.pos.y;
+                if ( vertex.base.pos.y > max_y ) max_y = vertex.base.pos.y;
+                if ( vertex.base.pos.z < min_z ) min_z = vertex.base.pos.z;
+                if ( vertex.base.pos.z > max_z ) max_z = vertex.base.pos.z;
             }
             indices.push_back( uniqueVertices[vertex] );
         }

@@ -79,10 +79,38 @@ class BoundingComponent : public Component
     AABB_box boundingBox;
 
     public:
+    // MAYBE make a seperate component, but WHATEVER. Idea is we're making it on the heap cause Id rather not make it like a... weird dingy pointer on the stack or own it elsewhere.
+    std::unique_ptr<ModelData> visualBox;
+
     BoundingComponent( AABB_box box ) : boundingBox(box)
     {
         std::cout << "Bounding Box Created: (" << boundingBox.min.x << "x, " << boundingBox.min.y << "y, " << boundingBox.min.z << "z) -> ("
         << boundingBox.max.x << "x, " << boundingBox.max.y << "y, " << boundingBox.max.z << "z)\n";
+    }
+
+    void createBoundingBuffer( const LogicalDevice& device )
+    {
+        std::vector<Vertex> corners = boundingBox.getBoxCorners();
+
+        visualBox = std::make_unique<ModelData>();
+
+        visualBox.get()->vertexBuffer.createGPUBuffer(
+            device,
+            sizeof(corners[0]) * corners.size(),
+            vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal, false );
+        visualBox.get()->vertexBuffer.muleBuffer( device, corners ); // make getBoxCorners return an array again, maybe overload muleBuffer to accept an array.
+        visualBox.get()->vertices_count = corners.size(); // Maybe make an index buffer as well?
+
+        // Index Buffer: We're making a 3d rectangle, hence.
+        std::vector<uint32_t> indices = AABB_box::getBoxIndices();
+
+        visualBox.get()->indexBuffer.createGPUBuffer(
+            device, sizeof(indices[0]) * indices.size(),
+            vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal, false );
+        visualBox.get()->indexBuffer.muleBuffer( device, indices );
+        visualBox.get()->indices_count = indices.size();
     }
 
 
@@ -115,7 +143,6 @@ class BoundingComponent : public Component
 class ModelComponent : public Component
 {
     ModelData* model;
-
 
     public:
     // We need to create a constructor because our AddComponents creates a component object via make_unique which calls upon the constructor based on the args.
@@ -247,16 +274,16 @@ class Frustum
     // If true: Render it; if false: Cull it. Outward Plane Normals.
     bool isBoxWithinFrustum( const AABB_box& box )
     {
-        std::array<glm::vec3, 8> corners = box.getBoxCorners();
+        std::vector<Vertex> vertexCorners = box.getBoxCorners();
         // APPARENTLY: you don't need to check EVERY corner for EVERY plane. you can just check ONE through some logic.
             // FIGURE. IT. OUT.
 
-        for ( const auto& corner : corners )
+        for ( const auto& vertexCorner : vertexCorners )
         {
             int outsideCorners = 0;
             for ( const auto& plane : frustumPlanes )
             {
-                float distance = ( glm::dot( plane.normal, corner ) ) - plane.offset;
+                float distance = ( glm::dot( plane.normal, vertexCorner.base.pos ) ) - plane.offset;
 
                 if ( distance > 0 )
                     outsideCorners++;

@@ -28,14 +28,17 @@ void RenderApplication::setup()
     createMVPUBOBuffers();
     createParticleComputeBuffers();
     createDebugBuffers();
+    createWireframeMVPUBOBuffers();
 
     createDescriptorPool();
     createModelDescriptors();
     createParticleDescriptors();
+    createWireframeDescriptors();
 
     createVertexGraphicsPipeline();
     createParticleGraphicsPipeline();
     createParticleComputePipeline();
+    createWireframeGraphicsPipeline();
 
     createThreads();
 }
@@ -63,6 +66,7 @@ void RenderApplication::createModels()
 
     // Probably a really good idea to ship some logic from createCatEntity (specifically about model components) into here.
     cat.addComponent<BoundingComponent>( catModel->loadModel( device, catFilepath ) ); // Maybe make loadModel return it directly instead of needing to make a separate variable?
+    cat.GetComponent<BoundingComponent>()->createBoundingBuffer( device );
     catModelHandle = modelManager.addResource( hashString( catFilepath ), std::move(catModel) );
 }
 
@@ -250,6 +254,23 @@ void RenderApplication::createDebugBuffers()
     }
 }
 
+// Abstract this. It's all a repeat of already existing code.
+void RenderApplication::createWireframeMVPUBOBuffers()
+{
+    wireframe_mvp_uboBuffers.clear();
+    for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+    {
+        GPUBuffer individualBuffer;
+        individualBuffer.createGPUBuffer(
+            device,
+            sizeof(mvpUBOBuffer),
+            vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
+            vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+            true );
+        wireframe_mvp_uboBuffers.emplace_back( std::move(individualBuffer) );
+    }
+}
+
 void RenderApplication::createDescriptorPool()
 {
     // Models
@@ -264,8 +285,11 @@ void RenderApplication::createDescriptorPool()
     // Particles Graphics
     vk::DescriptorPoolSize particleGraphicsDebugPoolSize( vk::DescriptorType::eStorageBuffer, MAX_FRAMES_IN_FLIGHT );
 
-    std::vector<vk::DescriptorPoolSize> poolSize { uboPoolSize, samplerPoolSize, debugUBOPoolSize, particleStoragePoolSize, particleUBOPoolSize, particleDebugPoolSize, particleGraphicsDebugPoolSize };
-    descriptorPool = DescriptorPool::createDescriptorPool( device.logicalDevice, poolSize, MAX_FRAMES_IN_FLIGHT * 3 ); // *2 because of models + particles, a distinct set per. check if right.
+    // Wireframe
+    vk::DescriptorPoolSize wire_uboPoolSize( vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT );
+
+    std::vector<vk::DescriptorPoolSize> poolSize { uboPoolSize, samplerPoolSize, debugUBOPoolSize, particleStoragePoolSize, particleUBOPoolSize, particleDebugPoolSize, particleGraphicsDebugPoolSize, wire_uboPoolSize };
+    descriptorPool = DescriptorPool::createDescriptorPool( device.logicalDevice, poolSize, MAX_FRAMES_IN_FLIGHT * 4 ); // *2 because of models + particles, a distinct set per. check if right.
 }
 
 void RenderApplication::createModelDescriptors()
@@ -360,6 +384,28 @@ void RenderApplication::createParticleDescriptors()
     }
 }
 
+void RenderApplication::createWireframeDescriptors()
+{
+    wireframeDescriptors.setDescriptorsPool( descriptorPool );
+
+    vk::DescriptorSetLayoutBinding wire_uboLayoutBinding(
+        0,
+        vk::DescriptorType::eUniformBuffer,
+        1,
+        vk::ShaderStageFlagBits::eVertex,
+        nullptr );
+
+    std::vector<vk::DescriptorSetLayoutBinding> layoutBindings { wire_uboLayoutBinding };
+    wireframeDescriptors.createDescriptorSetLayout( device.logicalDevice, layoutBindings );
+
+    wireframeDescriptors.createEmptyDescriptorSets( device.logicalDevice, MAX_FRAMES_IN_FLIGHT );
+
+    for ( int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
+    {
+        wireframeDescriptors.setBufferResource( device.logicalDevice, wireframe_mvp_uboBuffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(mvpUBOBuffer), i, 0 );
+    }
+}
+
 
 
 void RenderApplication::createVertexGraphicsPipeline()
@@ -368,8 +414,8 @@ void RenderApplication::createVertexGraphicsPipeline()
     std::vector<vk::PushConstantRange> vertexPushConstants{};
     graphicPipeline.createPipelineDescriptorLayout( device.logicalDevice, vertexPipelineDescriptorSetLayouts, vertexPushConstants );
 
-    auto bindingDescription    = Vertex::getBindingDescription();
-    auto attributeDescriptions = Vertex::getAttributeDescriptions();
+    auto bindingDescription    = TextureVertex::getBindingDescription();
+    auto attributeDescriptions = TextureVertex::getAttributeDescriptions();
     vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
         .vertexBindingDescriptionCount   = 1, .pVertexBindingDescriptions = &bindingDescription,
         .vertexAttributeDescriptionCount = static_cast<uint32_t>( attributeDescriptions.size() ), .pVertexAttributeDescriptions = attributeDescriptions.data() };
@@ -412,6 +458,23 @@ void RenderApplication::createParticleComputePipeline()
     particleComputePipeline.createComputePipeline( device.logicalDevice, shaderModules );
 }
 
+void RenderApplication::createWireframeGraphicsPipeline()
+{
+    std::vector<vk::DescriptorSetLayout> wireframePipelineDescriptorSetLayouts { wireframeDescriptors.descriptorSetLayout };
+    std::vector<vk::PushConstantRange> wireframePushConstants{};
+
+    wireframePipeline.createPipelineDescriptorLayout( device.logicalDevice, wireframePipelineDescriptorSetLayouts, wireframePushConstants );
+
+    auto bindingDescription    = Vertex::getBindingDescription();
+    auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
+    vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
+        .vertexBindingDescriptionCount   = 1, .pVertexBindingDescriptions = &bindingDescription,
+        .vertexAttributeDescriptionCount = static_cast<uint32_t>( attributeDescriptions.size() ), .pVertexAttributeDescriptions = attributeDescriptions.data() };
+
+    vk::raii::ShaderModule shaderModules = PipelineUtils::createShaderModule( device.logicalDevice, "../shaders/wireframe.spv" );
+    wireframePipeline.createGraphicsPipeline( device, shaderModules, swapChain, vk::PrimitiveTopology::eLineList, vertexInputInfo );
+}
 
 
 void RenderApplication::createThreads()
