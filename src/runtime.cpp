@@ -387,7 +387,7 @@ void RunTimeApplication::drawFrame()
 
     glm::vec3 guh = app->camera.GetComponent<TransformComponent>()->GetPosition();
 
-    //std::cout << "("<< guh.x << ", " << guh.y << ", " << guh.z << ")\n";
+    std::cout << "CAMERA: ("<< guh.x << ", " << guh.y << ", " << guh.z << ")\n";
 
     app->cullSystem.CullScene( app->allEntities );
 

@@ -1,0 +1,55 @@
+Specifically about AABB: https://gpfault.net/posts/aabb-tricks.html
+    See Kajiya and Kay's 1986 algorithm -- it's the standard here.
+
+
+First, a ray is fully defined by its origin point o and its direction d. Any point along the ray corresponds to a value of a scalar parameter t and can be found by evaluating o + t*d.
+
+O = starting point
+D = the direction itself
+T = how many units youve moved
+
+That returns the point in space of where you currently are, based upon T (well, obviously o and d are also important, but you -- I -- get the idea).
+
+
+An AABB can be represented by 3 "slabs"
+    A slab is essentially 2 infinite parallel planes.
+    A AABB is a rectangular shape, and so has 3 parallel "slabs" (planes).  this includes:
+        the 2 X planes (the sides of the bounding box) -- slab 1
+        the 2 Y planes (the top of the bounding box) -- slab 2
+        the 2 Z planes (the front and back of the bounding box) -- slab 3
+    Due to the nature of these being INFINITE parallel planes to a rectangle, these slabs are intersecting each other.
+        https://www.desmos.com/3d/45u8z6saep For a visual.
+
+========
+
+To "Project a vertex V onto Normal N", you do the dot product of dot( V, N )
+
+
+
+Separating Axis Theorem
+
+extent.x * std::abs(frustumPlanes[0].normal.x)
+
+the NORMAL.x is JUST the X direction of the frustum: 1.0 means its pointing PERFECTLY on the X axis, 0.5 means its slanted halfway, and 0.0 means its not at all moving towards X.
+Multiplying the extent of X by this value gives the number of "UNITS" that this box's X is visible -- think of it as a percentage:
+If the normal.x is 1.0, it means we see the ENTIRETY of the full box, hence it returns extent.X
+However, if the normal is 0.5, then we only see half of extent.x (so extent.x * 0.5) -- if the frustum is NOT moving AT ALL on the X axis (0.0), then we see NOTHING.
+You then do this for ALL axis, add them up to get an effective visiblity (r)
+If the DISTANCE from the AABB box's centre is GREATER than that effective visiblity value (-r), it is NOT visible.
+
+Think of it like REACH
+
+In 1 DIMENSION:
+
+If pointX is 10 units away from the plane, then its REACH has to be 10 or more to be visible.
+'R' is a LITERAL radius around the centre point.
+
+
+
+
+
+
+
+
+
+

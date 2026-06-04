@@ -272,11 +272,69 @@ class Frustum
     void createFrustum();
 
     // If true: Render it; if false: Cull it. Outward Plane Normals.
+            // APPARENTLY: you don't need to check EVERY corner for EVERY plane. you can just check ONE through some logic.
+            // FIGURE. IT. OUT.
+    // https://learnopengl.com/Guest-Articles/2021/Scene/Frustum-Culling
     bool isBoxWithinFrustum( const AABB_box& box )
     {
         std::vector<Vertex> vertexCorners = box.getBoxCorners();
-        // APPARENTLY: you don't need to check EVERY corner for EVERY plane. you can just check ONE through some logic.
-            // FIGURE. IT. OUT.
+
+        for ( const auto& vertex : vertexCorners )
+        {
+            std::cout << "(" << vertex.base.pos.x << ", " << vertex.base.pos.y << ", " << vertex.base.pos.z;
+            std::cout << ")\n";
+        }
+
+
+        for ( int i = 0; i < 6; i++ )
+        {
+            std::cout << frustumPlanes[i].normal.x << "x + " << frustumPlanes[i].normal.y << "y + " << frustumPlanes[i].normal.z << "z = " << frustumPlanes[i].offset << "\n";
+        }
+
+        getFrustumCorners();
+
+
+        Vertex centre = glm::vec3( (box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2 );
+
+        glm::vec3 trueMin = glm::min(box.max, box.min);
+        glm::vec3 trueMax = glm::max(box.max, box.min);
+        glm::vec3 extent = glm::vec3( ( trueMax.x - trueMin.x ) / 2, ( trueMax.y - trueMin.y ) / 2,( trueMax.z - trueMin.z ) / 2  );
+
+        // glm::vec3 min = glm::vec3(std::numeric_limits<float>::max());
+        // glm::vec3 max = glm::vec3(-std::numeric_limits<float>::max());
+        // for ( const auto& vertexCorner : vertexCorners )
+        // {
+        //     min.x = std::min( vertexCorner.base.pos.x, min.x );
+        //     min.y = std::min( vertexCorner.base.pos.y, min.y );
+        //     min.z = std::min( vertexCorner.base.pos.z, min.z );
+
+        //     max.x = std::max( vertexCorner.base.pos.x, max.x );
+        //     max.y = std::max( vertexCorner.base.pos.y, max.y );
+        //     max.z = std::max( vertexCorner.base.pos.z, max.z );
+        // }
+
+
+
+        // std::cout << "Min: " << box.min.x << ", " << box.min.y << ", " << box.min.z << ")\n";
+        // std::cout << "Max: " << box.max.x << ", " << box.max.y << ", " << box.max.z << ")\n";
+        // std::cout << "True Min: " << trueMin.x << ", " << trueMin.y << ", " << trueMin.z << ")\n";
+        // std::cout << "True Max: " << trueMax.x << ", " << trueMax.y << ", " << trueMax.z << ")\n";
+        // std::cout << "Iterated Min: " << min.x << ", " << min.y << ", " << min.z << ")\n";
+        // std::cout << "Iterated Max: " << max.x << ", " << max.y << ", " << max.z << ")\n";
+        // std::cout << "Extent: " << extent.x << ", " << extent.y << ", " << extent.z << ")\n";
+        // std::cout << "Centre: " << centre.base.pos.x << ", " << centre.base.pos.y << ", " << centre.base.pos.z << ")\n";
+
+        const float r = extent.x * std::abs(frustumPlanes[0].normal.x) +
+            extent.y * std::abs(frustumPlanes[0].normal.y) + extent.z * std::abs(frustumPlanes[0].normal.z);
+
+        //std::cout << "extentx * normalx: " << extent.x << " * " << std::abs(frustumPlanes[0].normal.x)<< " = " << ( extent.x * std::abs(frustumPlanes[0].normal.x ) ) << "\n";
+
+        float distance = glm::dot(frustumPlanes[0].normal, centre.base.pos) - frustumPlanes[0].offset;
+
+        // std::cout << "Distance: " << distance << "\n";
+        // std::cout << "R: " << r << "\n";
+        // std::cout << "Is within: " << (distance >= -r) << "\n\n";
+
 
         for ( const auto& vertexCorner : vertexCorners )
         {
@@ -296,6 +354,44 @@ class Frustum
         return false;
     }
 
+
+    std::vector<Vertex> getFrustumCorners()
+    {
+        std::vector<Plane> leftRightPlanes = { frustumPlanes[0], frustumPlanes[2] };
+        std::vector<Plane> bottomTopPlanes = { frustumPlanes[1], frustumPlanes[3] };
+        std::vector<Plane> nearFarPlanes = { frustumPlanes[4], frustumPlanes[5] };
+
+        std::vector<Vertex> vertices;
+
+        for ( const auto& viewPlane : nearFarPlanes )
+        {
+            for ( const auto& xPlane : leftRightPlanes )
+            {
+                for (const auto& yPlane : bottomTopPlanes )
+                {
+                    // Using some formula found online.
+                    glm::vec3 reusedCrossProduct = glm::cross( xPlane.normal, yPlane.normal );
+
+                    glm::vec3 point =
+                    ( ( viewPlane.offset * reusedCrossProduct ) +
+                    ( xPlane.offset * ( glm::cross( yPlane.normal, viewPlane.normal ) ) ) +
+                    ( yPlane.offset * ( glm::cross( viewPlane.normal, xPlane.normal ) ) ) )
+                    / ( glm::dot( viewPlane.normal, reusedCrossProduct ) );
+
+                    vertices.emplace_back( glm::vec3( point ) );
+                }
+            }
+        }
+
+        for ( const auto& vertex : vertices )
+        {
+            std::cout << "(" << vertex.base.pos.x << ", " << vertex.base.pos.y << ", " << vertex.base.pos.z << ")\n";
+        }
+
+        std::cout << "\n";
+
+        return vertices;
+    }
 };
 
 

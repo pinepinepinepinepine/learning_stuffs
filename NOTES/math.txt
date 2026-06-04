@@ -154,3 +154,217 @@ The exact way to handle culling isn't yet explored, but see https://docs.vulkan.
 for what the "pseudo code snippet" (ugh) does and try to mimic it. Just play around with it.
 
 =====================================
+
+
+Intersection of 2 planes, initial planes:
+
+0.265403x + -0.0208759y + 0.963912z = -8.25448
+-0.259034x + 0.891999y + 0.370458z = 33.3081
+
+ISOLATE X:
+0.265403x = -8.25448 - -0.0208759y - 0.963912z
+-0.259034x = 33.3081 - 0.891999y - 0.370458z
+
+
+DIVIDE BY THEIR X COMPONENT:
+x = (-8.25448 / 0.265403) - (-0.0208759 / 0.265403)y - (0.963912 / 0.265403)z
+x = -31.1016831008 - -0.07865736257y - 3.63188057407z
+
+x = (33.3081 / -0.259034) - (0.891999 / -0.259034)y - (0.370458 / -0.259034)z
+x = -128.585822711 - -3.44355953273y - -1.43015202637z
+
+-128.585822711 - -3.44355953273y - -1.43015202637z  =  -31.1016831008 - -0.07865736257y - 3.63188057407z
+    Clean it up ->
+-128.585822711 + 3.44355953273y + 1.43015202637z  =  -31.1016831008 + 0.07865736257y - 3.63188057407z
+
+Subtract the components:
+
+-128.585822711 + (3.44355953273 - 0.07865736257)y + 1.43015202637z  =  -31.1016831008 + ( 0.07865736257 - 0.07865736257 )y - 3.63188057407z
+-128.585822711 + 3.36490217016y + 1.43015202637z = -31.1016831008 - 3.63188057407z
+
+(-128.585822711 - -128.585822711) + 3.36490217016y + 1.43015202637z = (-31.1016831008 - -128.585822711) - 3.63188057407z
+3.36490217016y + (1.43015202637 + 3.63188057407 ) z = 97.4841396102 + ( -3.63188057407 + 3.63188057407 )z
+3.36490217016y + 5.06203260044z = 97.4841396102
+
+Which means...
+
+3.36490217016y + 5.06203260044z + (0 - 97.4841396102) = 97.4841396102 - 97.4841396102
+
+3.36490217016y + 5.06203260044z - 97.4841396102 = 0
+
+Which then means...
+
+3.36490217016y - 97.4841396102 = -5.06203260044z
+
+Then to isolate Z...
+
+(3.36490217016 / -5.06203260044)y - (97.4841396102 / -5.06203260044) = z
+
+-0.66473340568y + 19.2579043449 = z
+
+Then we plug it into our X equation
+
+x = -31.1016831008 - -0.07865736257y - 3.63188057407z
+x = -31.1016831008 - -0.07865736257y - 3.63188057407(-0.66473340568y + 19.2579043449)
+x = -31.1016831008 - -0.07865736257y - ((-0.66473340568 * 3.63188057407)y + ( 19.2579043449 * 3.63188057407))
+x = -31.1016831008 - -0.07865736257y - (-2.41423234302y + 69.9424086875)
+x = -31.1016831008 - -0.07865736257y + 2.41423234302y - 69.9424086875 // DISTRIBUTE THE MINUS TO THE ENTIRE PARANTHESIS
+x = (-31.1016831008 - 69.9424086875) - -0.07865736257y + 2.41423234302y
+x = -101.044091788 + 0.07865736257y + 2.41423234302y
+x = -101.044091788 + 2.49288970559y
+Same thing as:
+x = 2.49288970559y - 101.044091788
+
+x = -128.585822711 - -3.44355953273y - -1.43015202637z
+x = -128.585822711 - -3.44355953273y - -1.43015202637(-0.66473340568y + 19.2579043449)
+x = -128.585822711 - -3.44355953273y - ((-0.66473340568 * -1.43015202637)y + (19.2579043449 * -1.43015202637))
+x = -128.585822711 - -3.44355953273y - (0.95066982712y + -27.5417309225)
+x = -128.585822711 - -3.44355953273y + -0.95066982712y + 27.5417309225
+x = (-128.585822711 + 27.5417309225) + 3.44355953273y + -0.95066982712y
+x = (-128.585822711 + 27.5417309225) + 3.44355953273y - 0.95066982712y
+x = -101.044091788 + 2.49288970561y
+Same thing as:
+x = 2.49288970561y - 101.044091788 (rounding error, theyre the same number)
+
+y = y
+
+Then we convert the right hand side y to t:
+
+x = 2.49288970561(t) - 101.044091788
+y = t
+z = -0.66473340568(t) + 19.2579043449
+
+So if t is equal to, say arbitrarily, 2.7, then...
+
+x = 2.49288970561(2.7) - 101.044091788
+y = 2.7
+z = -0.66473340568(2.7) + 19.2579043449
+
+x = -94.3132895829
+y = 2.7
+z = 17.4631241496
+
+The 2 planes intersect at (-94.3132895829, 2.7, 17.4631241496)
+
+
+-0.996447x + -0.0208758y + 0.0815913z = 10.8187
+-0.225059x + -0.919647y + 0.321867z = -31.6101
+0.265403x + -0.0208759y + 0.963912z = -8.25448
+-0.259034x + 0.891999y + 0.370458z = 33.3081
+-0.572734x + -0.0327129y + 0.819088z = 2.10889
+0.572731x + 0.0327101y + -0.819091z = -1002.01
+
+
+To check 3 intersections (WHICH IS WHAT WE NEED FOR OUR CAMERA FRUSTUM'S CORNERS)
+
+Take the third plane:
+-0.572734x + -0.0327129y + 0.819088z = 2.10889 (Near)
+
+Plug in X/Z from the previous calculations
+
+x = 2.49288970561y - 101.044091788
+z = -0.66473340568y + 19.2579043449
+
+2.10889 = (2.49288970561y - 101.044091788) + -0.0327129y + 0.819088(-0.66473340568y + 19.2579043449)
+2.10889 = ((2.49288970561 * -0.572734)y - (101.044091788 * -0.572734)) + -0.0327129y + ((-0.66473340568 * 0.819088)y + (19.2579043449 * 0.819088))
+2.10889 = ((-1.42776269265)y - (-57.8713868661)) + -0.0327129y + ((-0.54447515579)y + (15.7739183541))
+2.10889 = -1.42776269265y + 57.8713868661 - 0.0327129y - 0.54447515579y + 15.7739183541
+2.10889 = -1.42776269265y + (57.8713868661 + 15.7739183541) - 0.0327129y - 0.54447515579y
+2.10889 = -1.42776269265y + (73.6453052202) - 0.0327129y - 0.54447515579y
+2.10889 = -1.42776269265y - 0.0327129y - 0.54447515579y + (73.6453052202)
+2.10889 - 73.6453052202 = -2.00495074844y
+-71.5364152202 = -2.00495074844y
+-71.5364152202 / -2.00495074844 = -2.00495074844y / -2.00495074844
+35.6798865388 = y
+
+
+Plug it into the equation
+
+x = 2.49288970561y - 101.044091788
+z = -0.66473340568y + 19.2579043449
+
+x = 2.49288970561(35.6798865388) - 101.044091788
+z = -0.66473340568(35.6798865388) + 19.2579043449
+
+x = -12.0980699381
+z = -4.45970814831
+35.6798865388 = y
+
+FOR SANITY CHECK:
+-0.572734(-12.0980699381) + -0.0327129(35.6798865388) + 0.819088(-4.45970814831) = 2.10889
+2.10888999979 = 2.10889
+    So yes, this point ( -12.0980699381, 35.6798865388, -4.45970814831 ) lies within this third plane, and so it's our intersection point of the 3 planes.
+
+
+THEN: All we have to do is just DO THIS 8 TIMES FOR EVERY CORNER OF THE FRUSTUM
+
+
+https://www.youtube.com/watch?v=o7CfCDkRwfY For 2 planes
+
+
+For 3 planes point intersection (which can give us a specific point, not a slider of T), we can forego the manual calculation above and use Cramer's Rule.
+
+Put the equations into a matrix (3x3)
+
+|x1, y1, z1|
+|x2, y2, z2|
+|x3, y3, z3|
+
+Then the column of offsets:
+|d1|
+|d2|
+|d3|
+
+Then, you create 3 "SUBSTITUTE MATRICES", where if you want to solve for X/Y/Z, you substitute the X/Y/Z column with the column of offsets:
+
+To solve for X:
+|d1, y1, z1|
+|d2, y2, z2|
+|d3, y3, z3|
+
+To solve for Y:
+|x1, d1, z1|
+|x2, d2, z2|
+|x3, d3, z3|
+
+To solve for Z:
+|x1, y1, d1|
+|x2, y2, d2|
+|x3, y3, d3|
+
+Then you find the determinants of the Main Matrix, and the 3 determinants of the substituted matrices xyz
+
+To solve for XYZ:
+x = det(substitutedMatrix_xColumn) / det(mainMatrix)
+y = det(substitutedMatrix_yColumn) / det(mainMatrix)
+z = det(substitutedMatrix_zColumn) / det(mainMatrix)
+
+Full code:
+                    // Cramer's Rule
+                    glm::vec3 offsetColumn ( viewPlane.offset, xPlane.offset, yPlane.offset ); // In the context of matrix multiplication, this is a mat3x1.
+                    glm::mat3 inRowsNormals_main = glm::transpose( glm::mat3( viewPlane.normal, xPlane.normal, yPlane.normal ) );
+                        // Transpose it so columns become rows: mat3 construction places them into columns, but we want | x1, y1, z1 | as a row, not a column
+
+                    glm::mat3 inRowsNormals_x = glm::mat3( offsetColumn, inRowsNormals_main[1], inRowsNormals_main[2] );
+                    glm::mat3 inRowsNormals_y = glm::mat3( inRowsNormals_main[0], offsetColumn, inRowsNormals_main[2] );
+                    glm::mat3 inRowsNormals_z = glm::mat3( inRowsNormals_main[0], inRowsNormals_main[1], offsetColumn );
+
+                    float mainMatrixDeterminant = glm::determinant(inRowsNormals_main);
+                    float x_intersection = ( (glm::determinant(inRowsNormals_x)) / mainMatrixDeterminant );
+                    float y_intersection = ( (glm::determinant(inRowsNormals_y)) / mainMatrixDeterminant );
+                    float z_intersection = ( (glm::determinant(inRowsNormals_z)) / mainMatrixDeterminant );
+
+                    vertices.emplace_back( glm::vec3( x_intersection, y_intersection, z_intersection ) );
+
+
+The final code we've landed on is this because it's fastest -- really as simple as just plugging everything in.
+                        // Using some formula found online.
+                    glm::vec3 reusedCrossProduct = glm::cross( xPlane.normal, yPlane.normal );
+
+                    glm::vec3 point =
+                    ( ( viewPlane.offset * reusedCrossProduct ) +
+                    ( xPlane.offset * ( glm::cross( yPlane.normal, viewPlane.normal ) ) ) +
+                    ( yPlane.offset * ( glm::cross( viewPlane.normal, xPlane.normal ) ) ) )
+                    / ( glm::dot( viewPlane.normal, reusedCrossProduct ) );
+
+                    vertices.emplace_back( glm::vec3( point ) );
