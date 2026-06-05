@@ -12,10 +12,11 @@ bool held_q = false;
 bool held_e = false;
 
 bool held_x = false;
-bool held_c = false;
 
 bool toggle_r = false;
 bool toggle_t = false;
+
+bool toggle_c = false;
 
 void glfw_keyCallback( GLFWwindow *window, int key, int scancode, int action, int mods )
 {
@@ -71,11 +72,6 @@ void glfw_keyCallback( GLFWwindow *window, int key, int scancode, int action, in
                 held_x = true;
                 break;
             }
-            case ( GLFW_KEY_C ):
-            {
-                held_c = true;
-                break;
-            }
             case ( GLFW_KEY_R ):
             {
                 if ( toggle_r )
@@ -90,6 +86,14 @@ void glfw_keyCallback( GLFWwindow *window, int key, int scancode, int action, in
                     toggle_t = false;
                 else
                     toggle_t = true;
+                break;
+            }
+            case ( GLFW_KEY_C ):
+            {
+                if ( toggle_c )
+                    toggle_c = false;
+                else
+                    toggle_c = true;
                 break;
             }
             default:
@@ -145,19 +149,16 @@ void glfw_keyCallback( GLFWwindow *window, int key, int scancode, int action, in
                 held_x = false;
                 break;
             }
-            case ( GLFW_KEY_C ):
-            {
-                held_c = false;
-                break;
-            }
             default:
                 break;
         }
     }
 }
 
+bool rightClickLock = false;
 
 glm::vec2 current_cursor_position(0,0);
+glm::vec2 right_click_lock_at(0,0);
 glm::vec2 cursor_clicked_at;
 bool held_click = false;
 bool moving_cursor = false;
@@ -179,6 +180,23 @@ void glfw_clickCallback( GLFWwindow *window, int button, int action, int mods )
     {
         held_click = false;
     }
+
+    if ( button == GLFW_MOUSE_BUTTON_RIGHT )
+    {
+        if ( action == GLFW_PRESS )
+        {
+            rightClickLock = true;
+            right_click_lock_at = current_cursor_position;
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        }
+        else if ( action == GLFW_RELEASE )
+        {
+            rightClickLock = false;
+            glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        }
+    }
+
+
 }
 
 

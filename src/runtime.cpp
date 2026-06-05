@@ -28,23 +28,30 @@ void RunTimeApplication::updateMVPUBOBuffer()
     mvpUBOBuffer mvpTransformationMatrix{};
 
     // Camera Rotation
-    static float radians_side = 0.0f;
-    int move_by = 0;
-    if ( held_click && moving_cursor )
-        move_by = cursor_clicked_at.x - current_cursor_position.x;
-    radians_side += ( move_by / 1000000.0f );
-    glm::quat rotaQuat_side = glm::angleAxis( glm::degrees( radians_side ), glm::vec3( 0.0f, 1.0f, 0.0f ) );
+    static glm::vec2 last_cursor_position = right_click_lock_at;
+    static bool prevFrame_rightClickLock = rightClickLock;
+    TransformComponent* currentCameraTransformation = currentCamera->GetComponent<TransformComponent>();
 
-    static float radians_up = 0.0f;
-    int shift_by = 0;
-    if ( held_click && moving_cursor )
-        shift_by = cursor_clicked_at.y - current_cursor_position.y;
-    radians_up += ( shift_by / 1000000.0f );
-    glm::quat rotaQuat_up = glm::angleAxis( glm::degrees( radians_up ), glm::vec3( 1.0f, 0.0f, 0.0f ) );
+    glm::mat4 camTransform = currentCameraTransformation->GetTransformMatrix();
+    bool wasMoved = false;
 
-    glm::quat rotaQuat = rotaQuat_side * rotaQuat_up;
-    app->camera.GetComponent<TransformComponent>()->SetRotation( rotaQuat );
+    if ( rightClickLock )
+    {
+        if ( !prevFrame_rightClickLock )
+            last_cursor_position = current_cursor_position;
 
+        glm::vec2 movement_this_frame = ( current_cursor_position - last_cursor_position ) * -0.0015f; // Make a sensitivity option.
+
+        // make a .Dirty variable (if its been modified for its position/rotation so that if true, when we call getCameraFrustum, it's right.)
+        if ( movement_this_frame.x || movement_this_frame.y )
+            wasMoved = true;
+
+        glm::quat rotaQuat_side = glm::angleAxis( movement_this_frame.x, glm::vec3( 0.0f, 1.0f, 0.0f ) );
+        glm::quat rotaQuat_up = glm::angleAxis( movement_this_frame.y, glm::vec3( 1.0f, 0.0f, 0.0f ) ) ;
+        currentCameraTransformation->SetRotation( rotaQuat_side * currentCameraTransformation->GetRotation() * rotaQuat_up );
+        last_cursor_position = current_cursor_position;
+    }
+    prevFrame_rightClickLock = rightClickLock;
 
     // Camera Position
     glm::vec3 movementVector(
@@ -54,15 +61,19 @@ void RunTimeApplication::updateMVPUBOBuffer()
     if ( glm::length( movementVector ) >= 1.0f )
         movementVector = glm::normalize( movementVector ); // Normalize it to have a length of 1 so we don't get that strafe thing where speed is faster when going sideways (Counter-strike's ladders!)
 
-    glm::vec3 position = app->camera.GetComponent<TransformComponent>()->GetPosition();
+    if ( wasMoved || ( movementVector.x || movementVector.y || movementVector.z ) )
+       currentCamera->GetComponent<CameraComponent>()->updateCameraFrustum();
+
+
+    glm::vec3 position = currentCamera->GetComponent<TransformComponent>()->GetPosition();
         // glm::vec3 z_movement = rotaQuat * glm::vec3( 0.0f, 0.0f, 1.0f );
         // glm::vec3 y_movement = rotaQuat * glm::vec3( 0.0f, 1.0f, 0.0f );
         // glm::vec3 x_movement = rotaQuat * glm::vec3( 1.0f, 0.0f, 0.0f );
         // position.x += (movementVector.z * z_movement.x) + (movementVector.x * x_movement.x) + (movementVector.y * y_movement.x);
         // position.y += (movementVector.z * z_movement.y) + (movementVector.x * x_movement.y) + (movementVector.y * y_movement.y);
         // position.z += (movementVector.z * z_movement.z) + (movementVector.x * x_movement.z) + (movementVector.y * y_movement.z);
-    position += (rotaQuat * movementVector); // Above comment block is the MANUAL way of calculating this.
-    app->camera.GetComponent<TransformComponent>()->SetPosition( position );
+    position += (currentCameraTransformation->GetRotation() * movementVector); // Above comment block is the MANUAL way of calculating this.
+    currentCamera->GetComponent<TransformComponent>()->SetPosition( position );
 
     // Model Rotation
     static double last_frame_time = glfwGetTime();
@@ -99,8 +110,8 @@ void RunTimeApplication::updateMVPUBOBuffer()
     was_toggled = toggle_t;
 
     mvpTransformationMatrix.model = app->cat.GetComponent<TransformComponent>()->GetTransformMatrix();
-    mvpTransformationMatrix.view = app->camera.GetComponent<CameraComponent>()->getViewMatrix(); // me: Figure out how engines do a global camera.
-    mvpTransformationMatrix.proj = app->camera.GetComponent<CameraComponent>()->getProjectionMatrix();
+    mvpTransformationMatrix.view = currentCamera->GetComponent<CameraComponent>()->getViewMatrix(); // me: Figure out how engines do a global camera.
+    mvpTransformationMatrix.proj = currentCamera->GetComponent<CameraComponent>()->getProjectionMatrix();
     mvpTransformationMatrix.proj[1][1] *= -1; // Flip Y for Vulkan
 
     memcpy( app->mvp_uboBuffers[executingCommandBufferIndex].gpuBufferMapped, &mvpTransformationMatrix, sizeof(mvpTransformationMatrix) );
@@ -208,6 +219,49 @@ void RunTimeApplication::recordBoundingCommandBuffer( uint32_t currentImageIndex
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
 }
 
+void RunTimeApplication::recordCameraFrustumBoundingCommandBuffer( uint32_t currentImageIndex )
+{
+    // turn this this copy and pasted big block into a function.
+    vk::RenderingAttachmentInfo colourAttachmentInfo {
+        .imageView          = app->colourImage.imageView,
+        .imageLayout        = vk::ImageLayout::eColorAttachmentOptimal,
+        .resolveMode        = vk::ResolveModeFlagBits::eAverage,
+        .resolveImageView   = app->swapChain.swapChainImages[currentImageIndex].imageView,
+        .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+        .loadOp             = vk::AttachmentLoadOp::eLoad,
+        .storeOp            = vk::AttachmentStoreOp::eStore };
+
+    vk::RenderingAttachmentInfo depthAttachmentInfo {
+        .imageView          = app->depthImage.imageView,
+        .imageLayout        = vk::ImageLayout::eDepthAttachmentOptimal,
+        .loadOp             = vk::AttachmentLoadOp::eLoad,
+        .storeOp            = vk::AttachmentStoreOp::eStore };
+
+    vk::RenderingInfo renderingInfo {
+        .renderArea           = { .offset = { 0, 0 }, .extent = app->swapChain.imageResolution },
+        .layerCount           = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments    = &colourAttachmentInfo,
+        .pDepthAttachment     = &depthAttachmentInfo };
+
+
+    app->camera.GetComponent<CameraComponent>()->getCameraFrustum().updateVisualFrustumBounds( app->device );
+
+    // TODO: have to also appropriately update the MVP.
+    Frustum* localCameraBounds = &app->camera.GetComponent<CameraComponent>()->getCameraFrustum();
+
+    Vertex* ptr = static_cast<Vertex*>(localCameraBounds->visualFrustum.get()->vertexBuffer.gpuBufferMapped);
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].beginRendering( renderingInfo );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindPipeline( vk::PipelineBindPoint::eGraphics, app->wireframePipeline.pipeline );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindVertexBuffers(0, *localCameraBounds->visualFrustum.get()->vertexBuffer.gpuBuffer, {0} ); // maybe make a resource handle for the bounding?
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindIndexBuffer( *localCameraBounds->visualFrustum.get()->indexBuffer.gpuBuffer, 0, vk::IndexType::eUint32 );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindDescriptorSets(
+       vk::PipelineBindPoint::eGraphics, app->wireframePipeline.pipelineLayout, 0, *app->wireframeDescriptors.descriptorSets[executingCommandBufferIndex], nullptr );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].drawIndexed( localCameraBounds->visualFrustum.get()->indices_count, 1, 0, 0, 0 );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
+}
+
 void RunTimeApplication::updateParticleBuffer()
 {
     ParticleTime particleTime;
@@ -219,9 +273,10 @@ void RunTimeApplication::updateWireMVPUBOBuffer()
 {
     mvpUBOBuffer mvpTransformationMatrix{};
 
+    // TODO: We need to separate the components. This causes the wireframe of the camera's frustum to also spin -- bad.
     mvpTransformationMatrix.model = app->cat.GetComponent<TransformComponent>()->GetTransformMatrix();
-    mvpTransformationMatrix.view = app->camera.GetComponent<CameraComponent>()->getViewMatrix();
-    mvpTransformationMatrix.proj = app->camera.GetComponent<CameraComponent>()->getProjectionMatrix();
+    mvpTransformationMatrix.view = currentCamera->GetComponent<CameraComponent>()->getViewMatrix();
+    mvpTransformationMatrix.proj = currentCamera->GetComponent<CameraComponent>()->getProjectionMatrix();
     mvpTransformationMatrix.proj[1][1] *= -1;
 
     memcpy( app->wireframe_mvp_uboBuffers[executingCommandBufferIndex].gpuBufferMapped, &mvpTransformationMatrix, sizeof(mvpTransformationMatrix) );
@@ -387,8 +442,6 @@ void RunTimeApplication::drawFrame()
 
     glm::vec3 guh = app->camera.GetComponent<TransformComponent>()->GetPosition();
 
-    std::cout << "CAMERA: ("<< guh.x << ", " << guh.y << ", " << guh.z << ")\n";
-
     app->cullSystem.CullScene( app->allEntities );
 
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].begin({});
@@ -398,6 +451,11 @@ void RunTimeApplication::drawFrame()
     recordCatCommandBuffer( imageIndex );
 
     recordBoundingCommandBuffer( imageIndex );
+
+    if ( toggle_c )
+    {
+        recordCameraFrustumBoundingCommandBuffer( imageIndex );
+    }
 
     app->threadManager.waitForthreadsToCompleteWork();
 
@@ -422,9 +480,13 @@ void RunTimeApplication::mainLoop()
 
         if ( moving_cursor == false && held_click )
         {
-            cursor_clicked_at = glm::vec2( current_cursor_position.x, current_cursor_position.y );
+            cursor_clicked_at = glm::vec2( current_cursor_position.x, current_cursor_position.y ); // Fix rotation on multiple cameras.
         }
 
+        if ( toggle_c )
+            currentCamera = &app->globalCamera; // Global Camera (debugging)
+        else
+            currentCamera = &app->camera; // Local Camera (user view)
 
         drawFrame();
 

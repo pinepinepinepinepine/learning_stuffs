@@ -18,7 +18,7 @@ class CullingSystem
         visibleEntities.clear();
         if ( !camera ) return;
 
-        Frustum& frustum = camera->updateCameraFrustum(); // HAS to be updated per frame for the cull.
+        Frustum& frustum = camera->getCameraFrustum(); // HAS to be updated per frame for the cull.
 
         for ( auto entity : allEntities )
         {
@@ -35,7 +35,6 @@ class CullingSystem
 
             // THIS IS NOT GOOD ENOUGH.
             AABB_box box = boundingComponent->transform( transformComponent->GetTransformMatrix() );
-
             frustum.isBoxWithinFrustum( box );
             // if ( frustum.isBoxWithinFrustum( box ) )
             //     std::cout << "RENDERING!\n";

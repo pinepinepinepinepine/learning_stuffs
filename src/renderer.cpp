@@ -80,9 +80,18 @@ void RenderApplication::createCatEntity()
 
     camera.addComponent<TransformComponent>( glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f) );
     camera.GetComponent<TransformComponent>()->SetPosition( {0, 35, -5} );
-    camera.GetComponent<TransformComponent>()->SetRotation( { 0.0f, 0.0f, -1.0f, 0.0f } );
+    //camera.GetComponent<TransformComponent>()->SetRotation( { 0.0f, 0.0f, -1.0f, 0.0f } );
     camera.addComponent<CameraComponent>();
-    camera.GetComponent<CameraComponent>()->setPerspective( 50.0f, 16.0 / 9.0f, 0.1f, 1000.0f );
+    camera.GetComponent<CameraComponent>()->setPerspective( 50.0f, 16.0 / 9.0f, 0.1f, 350.0f );
+    camera.GetComponent<CameraComponent>()->getCameraFrustum().createFrustumBuffer( device );
+    camera.GetComponent<CameraComponent>()->getCameraFrustum().createFrustum();
+    // Probably a WAY better idea to stop repeatedly calling getComponents and to cache it via a variable. Fix later.
+
+    globalCamera.addComponent<TransformComponent>( glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f) );
+    globalCamera.GetComponent<TransformComponent>()->SetPosition( { 0, 35, 350 } );
+    //globalCamera.GetComponent<TransformComponent>()->SetRotation( { 0.0f, 0.0f, -1.0f, 0.0f } ); // FUCK THIS KEEP IT REMOVED BECAUSE IT'S FUCKING UP OUR ROTATION DUE TO ROTATION * FORWARD
+    globalCamera.addComponent<CameraComponent>();
+    globalCamera.GetComponent<CameraComponent>()->setPerspective( 50.0f, 16.0 / 9.0f, 0.1f, 1000.0f );
 }
 
 void RenderApplication::cleanup()

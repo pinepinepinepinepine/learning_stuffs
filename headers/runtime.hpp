@@ -15,6 +15,8 @@ struct RunTimeApplication
     double lastFrameTime = 0.0;
     double lastTime = 0.0f;
 
+    Entity* currentCamera;
+
 
     RunTimeApplication( RenderApplication* setupInfo ) : app(setupInfo)
     {}
@@ -28,6 +30,7 @@ struct RunTimeApplication
     void recordParticleComputeCommandBuffer( const vk::raii::CommandBuffer& threadCommandBuffer, const ParticleGroup& pushConstantParticleGroup ); // Threaded
     void recordParticleGraphicCommandBuffer( uint32_t currentImageIndex );
     void recordBoundingCommandBuffer( uint32_t currentImageIndex );
+    void recordCameraFrustumBoundingCommandBuffer( uint32_t currentImageIndex );
     void transitionSwapChainImageToPresentOptimal( uint32_t currentImageIndex );
     void submitComputeCommandBuffers( uint64_t waitForValue, uint64_t signalValue );
     void submitCommandBuffers( uint32_t currentImageIndex, vk::PipelineStageFlags pipelineWaitStage, uint64_t waitForValue, uint64_t signalValue );

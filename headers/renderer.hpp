@@ -68,6 +68,7 @@ struct RenderApplication
 
     Entity cat {"Cat"};
     Entity camera {"Camera"};
+    Entity globalCamera {"GlobalCamera"};
     std::vector<Entity*> allEntities;
 
     CullingSystem cullSystem;
