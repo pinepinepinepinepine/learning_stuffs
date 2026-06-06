@@ -266,17 +266,17 @@ void RenderApplication::createDebugBuffers()
 // Abstract this. It's all a repeat of already existing code.
 void RenderApplication::createWireframeMVPUBOBuffers()
 {
-    wireframe_mvp_uboBuffers.clear();
+    wireframe_vp_uboBuffers.clear();
     for ( size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
     {
         GPUBuffer individualBuffer;
         individualBuffer.createGPUBuffer(
             device,
-            sizeof(mvpUBOBuffer),
+            sizeof(vpUBOBuffer),
             vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
             true );
-        wireframe_mvp_uboBuffers.emplace_back( std::move(individualBuffer) );
+        wireframe_vp_uboBuffers.emplace_back( std::move(individualBuffer) );
     }
 }
 
@@ -411,7 +411,7 @@ void RenderApplication::createWireframeDescriptors()
 
     for ( int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++ )
     {
-        wireframeDescriptors.setBufferResource( device.logicalDevice, wireframe_mvp_uboBuffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(mvpUBOBuffer), i, 0 );
+        wireframeDescriptors.setBufferResource( device.logicalDevice, wireframe_vp_uboBuffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(vpUBOBuffer), i, 0 );
     }
 }
 
@@ -470,7 +470,13 @@ void RenderApplication::createParticleComputePipeline()
 void RenderApplication::createWireframeGraphicsPipeline()
 {
     std::vector<vk::DescriptorSetLayout> wireframePipelineDescriptorSetLayouts { wireframeDescriptors.descriptorSetLayout };
-    std::vector<vk::PushConstantRange> wireframePushConstants{};
+
+    vk::PushConstantRange pushConstantRange {
+		.stageFlags = vk::ShaderStageFlagBits::eVertex,
+		.offset     = 0,
+		.size       = sizeof(glm::mat4) }; // Model Transformation Matrix (passing as a push constant, view and proj are descriptors.)
+
+    std::vector<vk::PushConstantRange> wireframePushConstants{ pushConstantRange };
 
     wireframePipeline.createPipelineDescriptorLayout( device.logicalDevice, wireframePipelineDescriptorSetLayouts, wireframePushConstants );
 

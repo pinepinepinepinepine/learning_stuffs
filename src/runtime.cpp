@@ -213,6 +213,11 @@ void RunTimeApplication::recordBoundingCommandBuffer( uint32_t currentImageIndex
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindPipeline( vk::PipelineBindPoint::eGraphics, app->wireframePipeline.pipeline );
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindVertexBuffers(0, *bound->visualBox.get()->vertexBuffer.gpuBuffer, {0} ); // maybe make a resource handle for the bounding?
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindIndexBuffer( *bound->visualBox.get()->indexBuffer.gpuBuffer, 0, vk::IndexType::eUint32 );
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].pushConstants<glm::mat4>(
+        app->wireframePipeline.pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0,
+        app->cat.GetComponent<TransformComponent>()->GetTransformMatrix() );
+
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindDescriptorSets(
        vk::PipelineBindPoint::eGraphics, app->wireframePipeline.pipelineLayout, 0, *app->wireframeDescriptors.descriptorSets[executingCommandBufferIndex], nullptr );
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].drawIndexed( bound->visualBox.get()->indices_count, 1, 0, 0, 0 );
@@ -244,7 +249,6 @@ void RunTimeApplication::recordCameraFrustumBoundingCommandBuffer( uint32_t curr
         .pColorAttachments    = &colourAttachmentInfo,
         .pDepthAttachment     = &depthAttachmentInfo };
 
-
     app->camera.GetComponent<CameraComponent>()->getCameraFrustum().updateVisualFrustumBounds( app->device );
 
     // TODO: have to also appropriately update the MVP.
@@ -256,6 +260,12 @@ void RunTimeApplication::recordCameraFrustumBoundingCommandBuffer( uint32_t curr
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindPipeline( vk::PipelineBindPoint::eGraphics, app->wireframePipeline.pipeline );
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindVertexBuffers(0, *localCameraBounds->visualFrustum.get()->vertexBuffer.gpuBuffer, {0} ); // maybe make a resource handle for the bounding?
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindIndexBuffer( *localCameraBounds->visualFrustum.get()->indexBuffer.gpuBuffer, 0, vk::IndexType::eUint32 );
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].pushConstants<glm::mat4>(
+        app->wireframePipeline.pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0,
+        glm::mat4(1) ); // Vertices are already in world space. We do not need to transform them within the shader.
+        // TODO: It WOULD be better to transform it onto the GPU because it IS faster, but we MIGHT have to compute them into world space because of our frustum culling logic. Look into it maybe?
+
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindDescriptorSets(
        vk::PipelineBindPoint::eGraphics, app->wireframePipeline.pipelineLayout, 0, *app->wireframeDescriptors.descriptorSets[executingCommandBufferIndex], nullptr );
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].drawIndexed( localCameraBounds->visualFrustum.get()->indices_count, 1, 0, 0, 0 );
@@ -271,15 +281,14 @@ void RunTimeApplication::updateParticleBuffer()
 
 void RunTimeApplication::updateWireMVPUBOBuffer()
 {
-    mvpUBOBuffer mvpTransformationMatrix{};
+    vpUBOBuffer vpTransformationMatrix{};
 
-    // TODO: We need to separate the components. This causes the wireframe of the camera's frustum to also spin -- bad.
-    mvpTransformationMatrix.model = app->cat.GetComponent<TransformComponent>()->GetTransformMatrix();
-    mvpTransformationMatrix.view = currentCamera->GetComponent<CameraComponent>()->getViewMatrix();
-    mvpTransformationMatrix.proj = currentCamera->GetComponent<CameraComponent>()->getProjectionMatrix();
-    mvpTransformationMatrix.proj[1][1] *= -1;
+    //TODO: We need to separate the components. This causes the wireframe of the camera's frustum to also spin -- bad.
+    vpTransformationMatrix.view = currentCamera->GetComponent<CameraComponent>()->getViewMatrix();
+    vpTransformationMatrix.proj = currentCamera->GetComponent<CameraComponent>()->getProjectionMatrix();
+    vpTransformationMatrix.proj[1][1] *= -1;
 
-    memcpy( app->wireframe_mvp_uboBuffers[executingCommandBufferIndex].gpuBufferMapped, &mvpTransformationMatrix, sizeof(mvpTransformationMatrix) );
+    memcpy( app->wireframe_vp_uboBuffers[executingCommandBufferIndex].gpuBufferMapped, &vpTransformationMatrix, sizeof(vpTransformationMatrix) );
 }
 
 void RunTimeApplication::recordParticleComputeCommandBuffer( const vk::raii::CommandBuffer& threadCommandBuffer, const ParticleGroup& pushConstantParticleGroup )

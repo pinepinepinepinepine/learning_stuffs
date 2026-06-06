@@ -23,6 +23,12 @@ struct mvpUBOBuffer {
     glm::mat4 proj;
 };
 
+// Model component is being passed as a push constant for the wireframe.
+struct vpUBOBuffer {
+    glm::mat4 view;
+    glm::mat4 proj;
+};
+
 struct RenderApplication
 {
     Window window;
@@ -46,7 +52,7 @@ struct RenderApplication
     std::vector<GPUBuffer> particle_storageBuffers_uboMule;
     std::vector<GPUBuffer> particle_debugComputeBuffers;
     std::vector<GPUBuffer> particle_debugGraphicsBuffers;
-    std::vector<GPUBuffer> wireframe_mvp_uboBuffers;
+    std::vector<GPUBuffer> wireframe_vp_uboBuffers;
 
     SwapChain swapChain;
     Image colourImage;

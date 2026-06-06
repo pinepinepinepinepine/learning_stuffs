@@ -7,8 +7,13 @@ struct VSOutput
     float4 pos : SV_Position;
 };
 
-struct modelUniformBuffer {
+// for some reason, this is required. I cannot change the type of pushConstants to float4x4. wtf?
+struct PushConstants {
     float4x4 model;
+};
+[[vk::push_constant]] PushConstants pushConstants;
+
+struct modelUniformBuffer {
     float4x4 view;
     float4x4 proj;
 };
@@ -17,7 +22,7 @@ struct modelUniformBuffer {
 [shader("vertex")]
 VSOutput vertMain(VSInput input) {
     VSOutput output;
-    output.pos = mul(m_ubo.proj, mul(m_ubo.view, mul(m_ubo.model, float4(input.inPosition, 1.0))));
+    output.pos = mul(m_ubo.proj, mul(m_ubo.view, mul(pushConstants.model, float4(input.inPosition, 1.0))));
     return output;
 }
 
