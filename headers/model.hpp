@@ -10,6 +10,30 @@ struct AABB_box
     glm::vec3 min;
     glm::vec3 max;
 
+    AABB_box( std::vector<Vertex>& vertices, const glm::mat4& transformation )
+    {
+        float min_x = std::numeric_limits<float>::max();
+        float max_x = std::numeric_limits<float>::lowest();
+        float min_y = std::numeric_limits<float>::max();
+        float max_y = std::numeric_limits<float>::lowest();
+        float min_z = std::numeric_limits<float>::max();
+        float max_z = std::numeric_limits<float>::lowest();
+
+        for ( auto& vertex : vertices )
+        {
+            vertex.base.pos = glm::vec3( transformation * glm::vec4(vertex.base.pos, 1.0f) );
+
+            if ( vertex.base.pos.x < min_x ) min_x = vertex.base.pos.x;
+            if ( vertex.base.pos.x > max_x ) max_x = vertex.base.pos.x;
+            if ( vertex.base.pos.y < min_y ) min_y = vertex.base.pos.y;
+            if ( vertex.base.pos.y > max_y ) max_y = vertex.base.pos.y;
+            if ( vertex.base.pos.z < min_z ) min_z = vertex.base.pos.z;
+            if ( vertex.base.pos.z > max_z ) max_z = vertex.base.pos.z;
+        }
+
+        min = { min_x, min_y, min_z };
+        max = { max_x, max_y, max_z };
+    }
     AABB_box( glm::vec3 _min, glm::vec3 _max ) : min(_min), max(_max) {}
 
     std::vector<Vertex> getBoxCorners() const

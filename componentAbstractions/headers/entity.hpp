@@ -74,19 +74,20 @@ class Component
         Entity* GetOwner() const { return owner; }
 };
 
-class BoundingComponent : public Component
+struct BoundingComponent : public Component
 {
     AABB_box boundingBox;
 
-    public:
     // MAYBE make a seperate component, but WHATEVER. Idea is we're making it on the heap cause Id rather not make it like a... weird dingy pointer on the stack or own it elsewhere.
     std::unique_ptr<ModelData> visualBox;
+    const glm::vec3 local_centre;
+    const glm::vec3 local_half_extents;
 
-    BoundingComponent( AABB_box box ) : boundingBox(box)
-    {
-        std::cout << "Bounding Box Created: (" << boundingBox.min.x << "x, " << boundingBox.min.y << "y, " << boundingBox.min.z << "z) -> ("
-        << boundingBox.max.x << "x, " << boundingBox.max.y << "y, " << boundingBox.max.z << "z)\n";
-    }
+    BoundingComponent( AABB_box box ) : boundingBox(box),
+    local_centre( ( box.min + box.max ) * 0.5f ),
+    local_half_extents(
+        glm::abs(box.max.x - box.min.x) * 0.5f, glm::abs(box.max.y - box.min.y) * 0.5f, glm::abs(box.max.z - box.min.z) * 0.5f )
+    {}
 
     void createBoundingBuffer( const LogicalDevice& device )
     {
@@ -299,34 +300,24 @@ class Frustum
             // APPARENTLY: you don't need to check EVERY corner for EVERY plane. you can just check ONE through some logic.
             // FIGURE. IT. OUT.
     // https://learnopengl.com/Guest-Articles/2021/Scene/Frustum-Culling
-    bool isBoxWithinFrustum( const AABB_box& box )
+    bool isBoxWithinFrustum( glm::mat4 transformationMatrix, std::vector<Vertex> vertices )
     {
-        std::vector<Vertex> vertexCorners = box.getBoxCorners();
+        AABB_box minMax { vertices, transformationMatrix };
+        BoundingComponent local { minMax };
 
-        Vertex centre = glm::vec3( (box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2 );
-
-        glm::vec3 trueMin = glm::min(box.max, box.min);
-        glm::vec3 trueMax = glm::max(box.max, box.min);
-        glm::vec3 extent = glm::vec3( ( trueMax.x - trueMin.x ) / 2, ( trueMax.y - trueMin.y ) / 2,( trueMax.z - trueMin.z ) / 2  );
-
-        const float r = extent.x * std::abs(frustumPlanes[0].normal.x) +
-            extent.y * std::abs(frustumPlanes[0].normal.y) + extent.z * std::abs(frustumPlanes[0].normal.z);
-
-        float distance = glm::dot(frustumPlanes[0].normal, centre.base.pos) - frustumPlanes[0].offset;
-
-        for ( const auto& vertexCorner : vertexCorners )
+        for ( const auto& plane : frustumPlanes )
         {
-            int outsideCorners = 0;
-            for ( const auto& plane : frustumPlanes )
-            {
-                float distance = ( glm::dot( plane.normal, vertexCorner.base.pos ) ) - plane.offset;
-                if ( distance > 0 )
-                    outsideCorners++;
-            }
-            if ( outsideCorners >= 6 )
-                return true;
+            // If we want some more precision, look up SAT techniques, but this is VERY good enough. (Gets dicey around the near plane, BUT it DOESNT get culled -- it'll RENDER.)
+            float rectangleRadius = local.local_half_extents.x * glm::abs( plane.normal.x ) +
+                local.local_half_extents.y * glm::abs( plane.normal.y ) +
+                local.local_half_extents.z * glm::abs( plane.normal.z );
+
+            float centreToPlane = glm::dot( plane.normal, local.local_centre ) - plane.offset;
+
+            if ( rectangleRadius >= centreToPlane && rectangleRadius < -centreToPlane )
+                return false;
         }
-        return false;
+        return true;
     }
 
     static std::vector<uint32_t> getFrustumIndices()
@@ -335,7 +326,7 @@ class Frustum
         {
             0, 1, 0, 2, 1, 3, 2, 3, // Near Plane
             4, 5, 4, 6, 5, 7, 6, 7, // Far Plane
-            0, 5, 1, 4, // Left Plane
+            1, 5, 0, 4, // Left Plane
             2, 6, 3, 7 // Right Plane
         };
         return indices;
@@ -510,9 +501,6 @@ inline void Frustum::updateFrustum()
         // p' = transpose(inverse(M))*p -- THE LAST PLANE'S NORMAL IS POINTING IN A DIFFERENT DIRECTION, HENCE THE ANNOYINGNESS. https://stackoverflow.com/questions/7685495/transforming-a-3d-plane-using-a-4x4-matrix
         glm::vec4 t = invTransposeM * glm::vec4( localPlane.normal, -localPlane.offset );
         t.w *= -1.0; // FOR SOME REASON, * -1.0 AND OFFSET IS NEGATIVE.
-        std::cout << "M*P transformed plane: " << t.x << " + " << t.y << " + " << t.z << " = " << t.w << "\n";
-
         frustumPlanes[i] = t;
     }
-    std::cout << std::endl;
 }
