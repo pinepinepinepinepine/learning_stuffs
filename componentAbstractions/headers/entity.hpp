@@ -36,7 +36,7 @@ struct Entity
     }
 
     template<typename T>
-    T* GetComponent() {
+    T* GetComponent() const {
         for (auto& component : components) {
             if (T* result = dynamic_cast<T*>(component.get())) // If the component is downcastable to <T>, result is not nullptr.
                 return result;

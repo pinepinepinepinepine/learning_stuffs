@@ -174,9 +174,9 @@ void RunTimeApplication::prepareImageLayout( uint32_t currentImageIndex )
 // Descriptors should be apart of the entity. Whenever that's implemented, cut the descriptor param.
 // GetComponent is a bit slower, hence pass the resource handle buffer.
 // Ideally, we pass an entire entity and use that to find descriptors/pointed to pipeline/etc.
-void RunTimeApplication::recordEntityCommandBuffers( uint32_t currentImageIndex, Entity* entity, bool renderBounding )
+void RunTimeApplication::recordEntityCommandBuffers( uint32_t currentImageIndex, const Entity* entity, bool renderBounding )
 {
-    if ( !entity->IsActive() )
+    if ( !entity->IsActive() ) // This is technically useless if we are culling and running thru visibleEntities, but whatever.
         return;
 
     RenderComponent* renderDetails = entity->GetComponent<RenderComponent>();
@@ -197,6 +197,7 @@ void RunTimeApplication::recordEntityCommandBuffers( uint32_t currentImageIndex,
     // For now, a specific pipeline for bounding boxes works fine, so... yeah. it's hardcoded.
     ModelData* boxDetails = entity->GetComponent<BoundingComponent>()->visualBox.get();
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindPipeline( vk::PipelineBindPoint::eGraphics, app->wireframePipeline.pipeline ); // Maybe don't make it hardcoded? Maybe add onto RenderComponent?
+
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindVertexBuffers(0, *boxDetails->vertexBuffer.gpuBuffer, {0} ); // maybe make a resource handle for the bounding?
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindIndexBuffer( *boxDetails->indexBuffer.gpuBuffer, 0, vk::IndexType::eUint32 );
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindDescriptorSets(
@@ -443,10 +444,15 @@ void RunTimeApplication::drawFrame()
 
     app->threadManager.signalThreadsToWork();
 
-    // TODO: call begin rendering and end rendering once. Draw all images in one pass.
-    prepareImageLayout( imageIndex );
+    app->cullSystem.CullScene( app->allEntities );
+    const std::vector<Entity*>& visibleEntities = app->cullSystem.getVisibleEntities();
 
-    recordEntityCommandBuffers( imageIndex, &app->cat, true ); // TODO: Add a debug switch instead of TRUE to allow bounding boxes to be rendered while the object itself is out of the frustum.
+    prepareImageLayout( imageIndex ); // TODO: call begin rendering and end rendering once. Draw all images in one pass.
+    for ( const Entity* entity : visibleEntities )
+    {
+        recordEntityCommandBuffers( imageIndex, entity, true ); // TODO: Add a debug switch instead of TRUE to allow bounding boxes to be rendered while the object itself is out of the frustum.
+    }
+
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
 
     // Clean up everything below. The particles are just... no reason to include it, but I mean it's probably handy to keep in, so just yeah.

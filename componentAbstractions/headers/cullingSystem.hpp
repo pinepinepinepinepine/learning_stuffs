@@ -36,13 +36,10 @@ class CullingSystem
 
             entity->SetActive( inFrame );
 
-
             if ( inFrame )
-                std::cout << "RENDERING!\n";
-            else
-                std::cout << "culled.\n";
+                visibleEntities.push_back( entity );
         }
-
     }
 
+    const std::vector<Entity*>& getVisibleEntities() { return visibleEntities; }
 };
