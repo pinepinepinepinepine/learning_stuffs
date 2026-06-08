@@ -26,6 +26,7 @@ struct RunTimeApplication
     void updateMVPUBOBuffer();
     void updateParticleBuffer();
     void updateWireMVPUBOBuffer();
+    void prepareImageLayout( uint32_t currentImageIndex );
     void recordCatCommandBuffer( uint32_t currentImageIndex );
     void recordParticleComputeCommandBuffer( const vk::raii::CommandBuffer& threadCommandBuffer, const ParticleGroup& pushConstantParticleGroup ); // Threaded
     void recordParticleGraphicCommandBuffer( uint32_t currentImageIndex );

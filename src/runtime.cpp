@@ -120,16 +120,13 @@ void RunTimeApplication::updateMVPUBOBuffer()
     //std::cout << "Quaternion Rotation of Camera: " << rotaQuat.w << ", " << rotaQuat.x << ", " << rotaQuat.y << ", " << rotaQuat.z << "\n\n";
 }
 
-void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
+void RunTimeApplication::prepareImageLayout( uint32_t currentImageIndex )
 {
     app->swapChain.swapChainImages[currentImageIndex].changeImageLayout(
         vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
         {}, vk::AccessFlagBits2::eColorAttachmentWrite,
         vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::PipelineStageFlagBits2::eColorAttachmentOutput,
         vk::ImageAspectFlagBits::eColor, 1, &app->cmdBuffers.commandBuffers[executingCommandBufferIndex] ); // Maybe make a #define for 1 in the context of mipImages?
-
-    vk::ClearValue clearColour = vk::ClearColorValue( (199/255.0f), (160/255.0f), (148/255.0f), 1.0f );
-    vk::ClearValue clearDepth = vk::ClearDepthStencilValue( 1.0f, 0 );
 
     // TODO: can we REUSE these? do we HAVE to change layout EVERY record?
     app->colourImage.changeImageLayout(
@@ -143,6 +140,9 @@ void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
         vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
         vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
         vk::ImageAspectFlagBits::eDepth, 1, &app->cmdBuffers.commandBuffers[executingCommandBufferIndex] );
+
+    vk::ClearValue clearColour = vk::ClearColorValue( (199/255.0f), (160/255.0f), (148/255.0f), 1.0f );
+    vk::ClearValue clearDepth = vk::ClearDepthStencilValue( 1.0f, 0 );
 
     vk::RenderingAttachmentInfo colourAttachmentInfo {
         .imageView          = app->colourImage.imageView,
@@ -160,6 +160,33 @@ void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
         .loadOp             = vk::AttachmentLoadOp::eClear,
         .storeOp            = vk::AttachmentStoreOp::eStore,
         .clearValue = clearDepth };
+
+    vk::RenderingInfo renderingInfo {
+        .renderArea           = { .offset = { 0, 0 }, .extent = app->swapChain.imageResolution },
+        .layerCount           = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments    = &colourAttachmentInfo,
+        .pDepthAttachment     = &depthAttachmentInfo };
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].beginRendering( renderingInfo );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
+}
+
+void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
+{
+    vk::RenderingAttachmentInfo colourAttachmentInfo {
+        .imageView          = app->colourImage.imageView,
+        .imageLayout        = vk::ImageLayout::eColorAttachmentOptimal,
+        .resolveMode        = vk::ResolveModeFlagBits::eAverage,
+        .resolveImageView   = app->swapChain.swapChainImages[currentImageIndex].imageView,
+        .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+        .loadOp             = vk::AttachmentLoadOp::eLoad,
+        .storeOp            = vk::AttachmentStoreOp::eStore };
+
+    vk::RenderingAttachmentInfo depthAttachmentInfo {
+        .imageView          = app->depthImage.imageView,
+        .imageLayout        = vk::ImageLayout::eDepthAttachmentOptimal,
+        .loadOp             = vk::AttachmentLoadOp::eLoad };
 
     vk::RenderingInfo renderingInfo {
         .renderArea           = { .offset = { 0, 0 }, .extent = app->swapChain.imageResolution },
@@ -457,9 +484,12 @@ void RunTimeApplication::drawFrame()
 
     app->threadManager.signalThreadsToWork();
 
-    recordCatCommandBuffer( imageIndex );
+    prepareImageLayout( imageIndex );
 
-    recordBoundingCommandBuffer( imageIndex );
+    if ( app->cat.IsActive() )
+        recordCatCommandBuffer( imageIndex );
+    if ( true ) // TODO: Add a debug switch instead of TRUE to allow bounding boxes to be rendered while the object itself is out of the frustum.
+        recordBoundingCommandBuffer( imageIndex );
 
     if ( toggle_c )
     {

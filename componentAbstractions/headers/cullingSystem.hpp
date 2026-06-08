@@ -20,7 +20,7 @@ class CullingSystem
 
         Frustum& frustum = camera->getCameraFrustum(); // HAS to be updated per frame for the cull.
 
-        for ( auto entity : allEntities )
+        for ( Entity* entity : allEntities )
         {
             // For an entity, we should also check if it's active (if yes, go to the next loop iteration via continue), but whatever, ignore it for now.
             auto modelComponent = entity->GetComponent<ModelComponent>();
@@ -33,6 +33,10 @@ class CullingSystem
             if ( !boundingComponent ) throw std::runtime_error("Culling: bounding component is nullptr.");; // In the tutorial, it isn't a compotent, but I think it's neater like this.
 
             bool inFrame = frustum.isBoxWithinFrustum( transformComponent->GetTransformMatrix(), boundingComponent->boundingBox.getBoxCorners() );
+
+            entity->SetActive( inFrame );
+
+
             if ( inFrame )
                 std::cout << "RENDERING!\n";
             else
