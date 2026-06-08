@@ -17,8 +17,6 @@ struct Entity
     bool isEntityActive = false;
     std::vector<std::unique_ptr<Component>> components;
 
-    Descriptor entityDescriptor;
-
     public:
     explicit Entity(const std::string& entityName ) : nameOfEntity(entityName) {}
 
@@ -154,6 +152,22 @@ class TextureComponent : public Component
     vk::DescriptorSetLayoutBinding getDescriptorSetLayoutBinding( uint32_t binding = 1 );
 };
 
+class RenderComponent : public Component
+{
+    Descriptor* descriptor;
+    Pipeline* pipeline;
+
+    public:
+    RenderComponent() = default;
+    RenderComponent( Pipeline* p, Descriptor* d ) : descriptor(d), pipeline(p) {}
+
+    void setDescriptor( Descriptor* d ) { descriptor = d; }
+    void setPipeline( Pipeline* p ) { pipeline = p; }
+
+    Descriptor* getDescriptor() { return descriptor; }
+    Pipeline* getPipeline() { return pipeline; }
+};
+
 
 // How we transform this entity
 class TransformComponent : public Component
@@ -203,7 +217,7 @@ class TransformComponent : public Component
 
 class CameraComponent;
 
-
+// Move this.
 struct Plane
 {
     glm::vec3 normal;

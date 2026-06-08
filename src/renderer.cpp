@@ -19,12 +19,6 @@ void RenderApplication::setup()
     createTextures();
     createModels();
 
-    createCatEntity();
-
-    allEntities.push_back( &cat );
-
-    cullSystem.setCamera( camera.GetComponent<CameraComponent>() );
-
     createMVPUBOBuffers();
     createParticleComputeBuffers();
     createDebugBuffers();
@@ -41,6 +35,11 @@ void RenderApplication::setup()
     createWireframeGraphicsPipeline();
 
     createThreads();
+
+    // Above is setup, below is actual stuff.
+    createCatEntity();
+    allEntities.push_back( &cat );
+    cullSystem.setCamera( camera.GetComponent<CameraComponent>() );
 }
 
 void RenderApplication::createTextures()
@@ -77,6 +76,7 @@ void RenderApplication::createCatEntity()
     cat.addComponent<TextureComponent>( poTextureHandle.get() );
     cat.addComponent<TransformComponent>( glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f) ); // Fix this. Temporary, just using default.
     cat.addComponent<CameraComponent>();
+    cat.addComponent<RenderComponent>( &graphicPipeline, &descriptors );
 
     camera.addComponent<TransformComponent>( glm::vec3(0.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f) );
     camera.GetComponent<TransformComponent>()->SetPosition( {0, 35, -5} );

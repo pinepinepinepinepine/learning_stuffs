@@ -169,7 +169,27 @@ void RunTimeApplication::prepareImageLayout( uint32_t currentImageIndex )
         .pDepthAttachment     = &depthAttachmentInfo };
 
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].beginRendering( renderingInfo );
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
+}
+
+// Descriptors should be apart of the entity. Whenever that's implemented, cut the descriptor param.
+// GetComponent is a bit slower, hence pass the resource handle buffer.
+// Ideally, we pass an entire entity and use that to find descriptors/pointed to pipeline/etc.
+void RunTimeApplication::recordEntityCommandBuffers( uint32_t currentImageIndex, Entity* entity )
+{
+    if ( !entity->IsActive() )
+        return;
+
+    RenderComponent* renderDetails = entity->GetComponent<RenderComponent>();
+    ModelData* modelDetails = entity->GetComponent<ModelComponent>()->getModel();
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindPipeline( vk::PipelineBindPoint::eGraphics, renderDetails->getPipeline()->pipeline );
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindVertexBuffers(0, *modelDetails->vertexBuffer.gpuBuffer, {0} );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindIndexBuffer( *modelDetails->indexBuffer.gpuBuffer, 0, vk::IndexType::eUint32 );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindDescriptorSets(
+       vk::PipelineBindPoint::eGraphics, renderDetails->getPipeline()->pipelineLayout, 0, *renderDetails->getDescriptor()->descriptorSets[executingCommandBufferIndex], nullptr );
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].drawIndexed( modelDetails->indices_count, 1, 0, 0, 0 );
 }
 
 void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
@@ -484,10 +504,11 @@ void RunTimeApplication::drawFrame()
 
     app->threadManager.signalThreadsToWork();
 
+    // TODO: call begin rendering and end rendering once. Draw all images in one pass.
     prepareImageLayout( imageIndex );
 
-    if ( app->cat.IsActive() )
-        recordCatCommandBuffer( imageIndex );
+    recordEntityCommandBuffers( imageIndex, &app->cat );
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
     if ( true ) // TODO: Add a debug switch instead of TRUE to allow bounding boxes to be rendered while the object itself is out of the frustum.
         recordBoundingCommandBuffer( imageIndex );
 
