@@ -174,7 +174,7 @@ void RunTimeApplication::prepareImageLayout( uint32_t currentImageIndex )
 // Descriptors should be apart of the entity. Whenever that's implemented, cut the descriptor param.
 // GetComponent is a bit slower, hence pass the resource handle buffer.
 // Ideally, we pass an entire entity and use that to find descriptors/pointed to pipeline/etc.
-void RunTimeApplication::recordEntityCommandBuffers( uint32_t currentImageIndex, Entity* entity )
+void RunTimeApplication::recordEntityCommandBuffers( uint32_t currentImageIndex, Entity* entity, bool renderBounding )
 {
     if ( !entity->IsActive() )
         return;
@@ -190,87 +190,26 @@ void RunTimeApplication::recordEntityCommandBuffers( uint32_t currentImageIndex,
        vk::PipelineBindPoint::eGraphics, renderDetails->getPipeline()->pipelineLayout, 0, *renderDetails->getDescriptor()->descriptorSets[executingCommandBufferIndex], nullptr );
 
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].drawIndexed( modelDetails->indices_count, 1, 0, 0, 0 );
-}
 
-void RunTimeApplication::recordCatCommandBuffer( uint32_t currentImageIndex )
-{
-    vk::RenderingAttachmentInfo colourAttachmentInfo {
-        .imageView          = app->colourImage.imageView,
-        .imageLayout        = vk::ImageLayout::eColorAttachmentOptimal,
-        .resolveMode        = vk::ResolveModeFlagBits::eAverage,
-        .resolveImageView   = app->swapChain.swapChainImages[currentImageIndex].imageView,
-        .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-        .loadOp             = vk::AttachmentLoadOp::eLoad,
-        .storeOp            = vk::AttachmentStoreOp::eStore };
+    if ( !renderBounding )
+        return;
 
-    vk::RenderingAttachmentInfo depthAttachmentInfo {
-        .imageView          = app->depthImage.imageView,
-        .imageLayout        = vk::ImageLayout::eDepthAttachmentOptimal,
-        .loadOp             = vk::AttachmentLoadOp::eLoad };
-
-    vk::RenderingInfo renderingInfo {
-        .renderArea           = { .offset = { 0, 0 }, .extent = app->swapChain.imageResolution },
-        .layerCount           = 1,
-        .colorAttachmentCount = 1,
-        .pColorAttachments    = &colourAttachmentInfo,
-        .pDepthAttachment     = &depthAttachmentInfo };
-
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].beginRendering( renderingInfo );
-
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindPipeline( vk::PipelineBindPoint::eGraphics, app->graphicPipeline.pipeline );
-
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindVertexBuffers(0, *app->catModelHandle.get()->vertexBuffer.gpuBuffer, {0} );
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindIndexBuffer( *app->catModelHandle.get()->indexBuffer.gpuBuffer, 0, vk::IndexType::eUint32 );
-
+    // For now, a specific pipeline for bounding boxes works fine, so... yeah. it's hardcoded.
+    ModelData* boxDetails = entity->GetComponent<BoundingComponent>()->visualBox.get();
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindPipeline( vk::PipelineBindPoint::eGraphics, app->wireframePipeline.pipeline ); // Maybe don't make it hardcoded? Maybe add onto RenderComponent?
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindVertexBuffers(0, *boxDetails->vertexBuffer.gpuBuffer, {0} ); // maybe make a resource handle for the bounding?
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindIndexBuffer( *boxDetails->indexBuffer.gpuBuffer, 0, vk::IndexType::eUint32 );
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindDescriptorSets(
-       vk::PipelineBindPoint::eGraphics, app->graphicPipeline.pipelineLayout, 0, *app->descriptors.descriptorSets[executingCommandBufferIndex], nullptr );
-
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].drawIndexed( app->catModelHandle.get()->indices_count, 1, 0, 0, 0 ); // todo: is there a better alternative for indices_count?
-
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
-}
-
-void RunTimeApplication::recordBoundingCommandBuffer( uint32_t currentImageIndex )
-{
-    // turn this this copy and pasted big block into a function.
-    vk::RenderingAttachmentInfo colourAttachmentInfo {
-        .imageView          = app->colourImage.imageView,
-        .imageLayout        = vk::ImageLayout::eColorAttachmentOptimal,
-        .resolveMode        = vk::ResolveModeFlagBits::eAverage,
-        .resolveImageView   = app->swapChain.swapChainImages[currentImageIndex].imageView,
-        .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-        .loadOp             = vk::AttachmentLoadOp::eLoad,
-        .storeOp            = vk::AttachmentStoreOp::eStore };
-
-    vk::RenderingAttachmentInfo depthAttachmentInfo {
-        .imageView          = app->depthImage.imageView,
-        .imageLayout        = vk::ImageLayout::eDepthAttachmentOptimal,
-        .loadOp             = vk::AttachmentLoadOp::eLoad,
-        .storeOp            = vk::AttachmentStoreOp::eStore };
-
-    vk::RenderingInfo renderingInfo {
-        .renderArea           = { .offset = { 0, 0 }, .extent = app->swapChain.imageResolution },
-        .layerCount           = 1,
-        .colorAttachmentCount = 1,
-        .pColorAttachments    = &colourAttachmentInfo,
-        .pDepthAttachment     = &depthAttachmentInfo };
-
-    BoundingComponent* bound = app->cat.GetComponent<BoundingComponent>();
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].beginRendering( renderingInfo );
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindPipeline( vk::PipelineBindPoint::eGraphics, app->wireframePipeline.pipeline );
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindVertexBuffers(0, *bound->visualBox.get()->vertexBuffer.gpuBuffer, {0} ); // maybe make a resource handle for the bounding?
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindIndexBuffer( *bound->visualBox.get()->indexBuffer.gpuBuffer, 0, vk::IndexType::eUint32 );
+       vk::PipelineBindPoint::eGraphics, app->wireframePipeline.pipelineLayout, 0, *app->wireframeDescriptors.descriptorSets[executingCommandBufferIndex], nullptr ); // Similarily, MAYBE add the descriptor component somewhere?
 
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].pushConstants<glm::mat4>(
         app->wireframePipeline.pipelineLayout, vk::ShaderStageFlagBits::eVertex, 0,
-        app->cat.GetComponent<TransformComponent>()->GetTransformMatrix() );
+        entity->GetComponent<TransformComponent>()->GetTransformMatrix() );
 
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].bindDescriptorSets(
-       vk::PipelineBindPoint::eGraphics, app->wireframePipeline.pipelineLayout, 0, *app->wireframeDescriptors.descriptorSets[executingCommandBufferIndex], nullptr );
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].drawIndexed( bound->visualBox.get()->indices_count, 1, 0, 0, 0 );
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].drawIndexed( boxDetails->indices_count, 1, 0, 0, 0 );
 }
 
+// I hate this. Not really too important, but it's PROBABLY a better idea to use EntityRecordCommandBuffer as well.
 void RunTimeApplication::recordCameraFrustumBoundingCommandBuffer( uint32_t currentImageIndex )
 {
     // turn this this copy and pasted big block into a function.
@@ -507,11 +446,10 @@ void RunTimeApplication::drawFrame()
     // TODO: call begin rendering and end rendering once. Draw all images in one pass.
     prepareImageLayout( imageIndex );
 
-    recordEntityCommandBuffers( imageIndex, &app->cat );
+    recordEntityCommandBuffers( imageIndex, &app->cat, true ); // TODO: Add a debug switch instead of TRUE to allow bounding boxes to be rendered while the object itself is out of the frustum.
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
-    if ( true ) // TODO: Add a debug switch instead of TRUE to allow bounding boxes to be rendered while the object itself is out of the frustum.
-        recordBoundingCommandBuffer( imageIndex );
 
+    // Clean up everything below. The particles are just... no reason to include it, but I mean it's probably handy to keep in, so just yeah.
     if ( toggle_c )
     {
         recordCameraFrustumBoundingCommandBuffer( imageIndex );

@@ -27,14 +27,9 @@ struct RunTimeApplication
     void updateParticleBuffer();
     void updateWireMVPUBOBuffer();
     void prepareImageLayout( uint32_t currentImageIndex );
-
-
-    void recordEntityCommandBuffers( uint32_t currentImageIndex, Entity* entity );
-
-    void recordCatCommandBuffer( uint32_t currentImageIndex );
+    void recordEntityCommandBuffers( uint32_t currentImageIndex, Entity* entity, bool renderBounding = false );
     void recordParticleComputeCommandBuffer( const vk::raii::CommandBuffer& threadCommandBuffer, const ParticleGroup& pushConstantParticleGroup ); // Threaded
     void recordParticleGraphicCommandBuffer( uint32_t currentImageIndex );
-    void recordBoundingCommandBuffer( uint32_t currentImageIndex );
     void recordCameraFrustumBoundingCommandBuffer( uint32_t currentImageIndex );
     void transitionSwapChainImageToPresentOptimal( uint32_t currentImageIndex );
     void submitComputeCommandBuffers( uint64_t waitForValue, uint64_t signalValue );
