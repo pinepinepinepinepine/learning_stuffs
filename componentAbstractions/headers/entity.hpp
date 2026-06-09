@@ -181,6 +181,7 @@ class TransformComponent : public Component
     mutable bool transformDirty = true;
 
     public:
+    TransformComponent() = default;
     // We need to create a constructor because our AddComponents creates a component object via make_unique which calls upon the constructor based on the args.
     TransformComponent( glm::vec3 pos, glm::quat rot, glm::vec3 s ) : position(pos), rotation(rot), scale(s) {}
 

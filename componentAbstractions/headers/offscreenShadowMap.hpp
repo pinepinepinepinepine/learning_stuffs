@@ -2,6 +2,7 @@
 #include "entity.hpp"
 #include "../../headers/image.hpp"
 #include "../../headers/descriptors.hpp"
+#include "../../headers/pipeline.hpp"
 
 
     // https://github.com/SaschaWillems/Vulkan/blob/master/examples/shadowmapping/shadowmapping.cpp
@@ -12,6 +13,28 @@
 // First, when the fragment shader sees a pixel, it compares it to the depthShadowMapAttachment image as to see what the light originally recorded as the closest distance at that angle.
 // Then, we take that pixel and see how far that pixel is from the light.
 
+
+// Fix this. Redefinition. This is for offscreen's GPU buffers.
+struct mvpUBOBuffer {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
+};
+
+// This is for onscreen. Copy the entity's data from Transform and Camera component -- it houses this data.
+struct OnscreenBuffer
+{
+    glm::mat4 projection;
+    glm::mat4 view;
+    glm::mat4 model;
+    glm::mat4 depthBiasMVP;
+    glm::vec4 lightPos;
+    // Used for depth map visualization
+    float zNear;
+    float zFar;
+};
+
+
 struct OffscreenPass
 {
     int32_t width, height;
@@ -19,7 +42,18 @@ struct OffscreenPass
     Image depthShadowMapAttachment;
     VkRenderPass renderPass;
     VkSampler depthSampler;
-    VkDescriptorImageInfo descriptor;
+    Descriptor descriptor;
+
+    std::vector<GPUBuffer> offscreen_Buffers;
+    // Make a separate pipeline. We're not re-using the same one because a depth image can skip out a bunch of stages, so it's WAY faster to just use a custom made one.
+    Pipeline depthMapPipeline; // used to create the depth image
+};
+
+struct OnscreenPass
+{
+    Descriptor descriptor;
+    std::vector<GPUBuffer> onscreen_Buffers;
+    Pipeline* shadowPassPipeline; // Probably can reuse the normal graphic pipeline?
 };
 
 
@@ -28,6 +62,8 @@ class LightingSystem
     Entity lightCamera {"lightCamera"};
 
     OffscreenPass depthRenderPass;
+
+    OnscreenPass shadowRenderPass;
 
     void createOffscreenRenderPass( const vk::raii::Device& device )
     {
@@ -168,5 +204,92 @@ class LightingSystem
         depthRenderPass.frameBuffer = *vk::raii::Framebuffer( device.logicalDevice, framebufferCreateInfo );
     }
     // Dynamic Rendering ELIMINATES having to create framebuffers and render passes manually -- WHENEVER WE SWITCH TO DYNAMIC, AXE EM!
+
+
+    // Creating custom descriptors and pipelines for creating depth images.
+    void createBuffers( const LogicalDevice& device, const int& buffersToCreate )
+    {
+        depthRenderPass.offscreen_Buffers.clear();
+        shadowRenderPass.onscreen_Buffers.clear();
+
+        for ( size_t i = 0; i < buffersToCreate; i++ )
+        {
+            // Offscreen
+            GPUBuffer off_individualBuffer;
+            off_individualBuffer.createGPUBuffer(
+                device,
+                sizeof(mvpUBOBuffer),
+                vk::BufferUsageFlagBits::eUniformBuffer,
+                vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+                true );
+            depthRenderPass.offscreen_Buffers.emplace_back( std::move(off_individualBuffer) );
+
+            // Onscreen
+            GPUBuffer on_individualBuffer;
+            on_individualBuffer.createGPUBuffer(
+                device,
+                sizeof(OnscreenBuffer),
+                vk::BufferUsageFlagBits::eUniformBuffer,
+                vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
+                true );
+            shadowRenderPass.onscreen_Buffers.emplace_back( std::move(on_individualBuffer) );
+        }
+    }
+
+    // I seriously have to abstract this to not have to retype the same garbage after the 100th time -- rendergraphs are the solution?
+    void createDescriptors( vk::raii::DescriptorPool& pool, const vk::raii::Device& device, const int& sets ) // Don't forget to assign more space to the pool in renderer.cpp
+    {
+        // Reusing the descriptor pool because it's more efficient: Hence, passing it.
+        depthRenderPass.descriptor.setDescriptorsPool( pool );
+        shadowRenderPass.descriptor.setDescriptorsPool( pool );
+
+        // Shared by both offscreen and onscreen.
+        vk::DescriptorSetLayoutBinding uboLayoutBinding(
+            0,
+            vk::DescriptorType::eUniformBuffer,
+            1,
+            vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment,
+            nullptr );
+
+        // Used solely by onscreen.
+        vk::DescriptorSetLayoutBinding samplerLayoutBinding(
+            1,
+            vk::DescriptorType::eCombinedImageSampler,
+            1,
+            vk::ShaderStageFlagBits::eFragment,
+            nullptr );
+
+        std::vector<vk::DescriptorSetLayoutBinding> layoutBindings { uboLayoutBinding, samplerLayoutBinding };
+        depthRenderPass.descriptor.createDescriptorSetLayout( device, layoutBindings ); // Render technically has the sampler in its blueprint, but we are ignoring it.
+        shadowRenderPass.descriptor.createDescriptorSetLayout( device, layoutBindings );
+
+        depthRenderPass.descriptor.createEmptyDescriptorSets( device, sets );
+        shadowRenderPass.descriptor.createEmptyDescriptorSets( device, sets );
+
+        for ( int i = 0; i < sets; i++ )
+        {
+            // Offscreen: this chooses to ignore binding 1 (even though we specified in the blueprint) -- it's perfectly okay like this.
+            depthRenderPass.descriptor.setBufferResource( device, depthRenderPass.offscreen_Buffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(mvpUBOBuffer), i, 0 );
+
+            // Onscreen
+            shadowRenderPass.descriptor.setBufferResource( device, shadowRenderPass.onscreen_Buffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(OnscreenBuffer), i, 0 );
+            shadowRenderPass.descriptor.setSamplerResource( device, depthRenderPass.depthSampler, depthRenderPass.depthShadowMapAttachment.imageView, i, 1 );
+        }
+    }
+
+
+    void createPipeline()
+    {
+
+    }
+
+    // fuck this. probs a better way.
+    void createLightCamera()
+    {
+        // glm::vec3(-35.0f, 30.0f, 10.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f);
+        lightCamera.addComponent<TransformComponent>();
+        lightCamera.addComponent<CameraComponent>();
+    }
+
 
 };
