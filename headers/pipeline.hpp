@@ -20,11 +20,11 @@ class Pipeline
 
     std::vector<vk::PipelineShaderStageCreateInfo> createProgrammableModules( const vk::raii::ShaderModule& shaderModule );
     vk::PipelineViewportStateCreateInfo createViewport( vk::Extent2D dimensions );
-    vk::PipelineRasterizationStateCreateInfo createRasterizer();
-    vk::PipelineMultisampleStateCreateInfo createMultisampling( vk::SampleCountFlagBits samplesPer );
-    vk::PipelineDepthStencilStateCreateInfo createDepthStencil();
-    vk::PipelineColorBlendStateCreateInfo createColorBlending( vk::PipelineColorBlendAttachmentState& colorAttachmentInfo );
-    vk::PipelineRenderingCreateInfo createRendering( const vk::Format& colorFormat, const vk::Format& depthFormat );
+    static vk::PipelineRasterizationStateCreateInfo createRasterizer();
+    static vk::PipelineMultisampleStateCreateInfo createMultisampling( vk::SampleCountFlagBits samplesPer );
+    static vk::PipelineDepthStencilStateCreateInfo createDepthStencil();
+    static vk::PipelineColorBlendStateCreateInfo createColorBlending( vk::PipelineColorBlendAttachmentState& colorAttachmentInfo );
+    static vk::PipelineRenderingCreateInfo createRendering( const vk::Format& colorFormat, const vk::Format& depthFormat );
     void createPipelineDescriptorLayout( const vk::raii::Device& device, const std::vector<vk::DescriptorSetLayout>& descriptorSetLayouts, const std::vector<vk::PushConstantRange>& pushConstants );
     void createGraphicsPipeline( const LogicalDevice& device, const vk::raii::ShaderModule& shaderModule, const SwapChain& framebuffer, vk::PrimitiveTopology topology, const vk::PipelineVertexInputStateCreateInfo& vertexInputInfo );
     void createComputePipeline( const vk::raii::Device& device, const vk::raii::ShaderModule& shaderModule );

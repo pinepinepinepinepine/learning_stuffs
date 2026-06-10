@@ -34,7 +34,6 @@ struct OnscreenBuffer
     float zFar;
 };
 
-
 struct OffscreenPass
 {
     int32_t width, height;
@@ -53,7 +52,7 @@ struct OnscreenPass
 {
     Descriptor descriptor;
     std::vector<GPUBuffer> onscreen_Buffers;
-    Pipeline* shadowPassPipeline; // Probably can reuse the normal graphic pipeline?
+    Pipeline shadowPassPipeline;
 };
 
 
@@ -237,7 +236,7 @@ class LightingSystem
     }
 
     // I seriously have to abstract this to not have to retype the same garbage after the 100th time -- rendergraphs are the solution?
-    void createDescriptors( vk::raii::DescriptorPool& pool, const vk::raii::Device& device, const int& sets ) // Don't forget to assign more space to the pool in renderer.cpp
+    void createDescriptors( vk::raii::DescriptorPool& pool, vk::raii::Device& device, const int& sets ) // Don't forget to assign more space to the pool in renderer.cpp
     {
         // Reusing the descriptor pool because it's more efficient: Hence, passing it.
         depthRenderPass.descriptor.setDescriptorsPool( pool );
@@ -275,11 +274,82 @@ class LightingSystem
             shadowRenderPass.descriptor.setBufferResource( device, shadowRenderPass.onscreen_Buffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(OnscreenBuffer), i, 0 );
             shadowRenderPass.descriptor.setSamplerResource( device, depthRenderPass.depthSampler, depthRenderPass.depthShadowMapAttachment.imageView, i, 1 );
         }
+
+        createPipelines( device, { depthRenderPass.descriptor.descriptorSetLayout } );
     }
 
-
-    void createPipeline()
+    void createPipelines( vk::raii::Device& device, const std::vector<vk::DescriptorSetLayout>& descriptorLayouts )
     {
+        // Generic, shared.
+        vk::PipelineInputAssemblyStateCreateInfo inputAssemblyCreateInfo { .topology = vk::PrimitiveTopology::eTriangleList };
+
+        vk::PipelineRasterizationStateCreateInfo rasterizationCreateInfo = Pipeline::createRasterizer();
+
+        vk::PipelineColorBlendAttachmentState colorBlendAttachment { // Need to pass this because otherwise createInfo'll house a dangling reference. Probably make this a static return.
+            .blendEnable         = vk::True,
+            .srcColorBlendFactor = vk::BlendFactor::eSrcAlpha,
+            .dstColorBlendFactor = vk::BlendFactor::eOneMinusSrcAlpha,
+            .colorBlendOp        = vk::BlendOp::eAdd,
+            .srcAlphaBlendFactor = vk::BlendFactor::eOne,
+            .dstAlphaBlendFactor = vk::BlendFactor::eZero,
+            .alphaBlendOp        = vk::BlendOp::eAdd,
+            .colorWriteMask      = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA };
+        vk::PipelineColorBlendStateCreateInfo colorBlendCreateInfo = Pipeline::createColorBlending( colorBlendAttachment );
+
+        vk::PipelineDepthStencilStateCreateInfo depthStencilCreateInfo = Pipeline::createDepthStencil();
+        depthStencilCreateInfo.depthCompareOp = vk::CompareOp::eLessOrEqual;
+
+        std::vector<vk::DynamicState> dynamicStates { vk::DynamicState::eViewport, vk::DynamicState::eScissor };
+        vk::PipelineDynamicStateCreateInfo dynamicStatesCreateInfo {
+            .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
+            .pDynamicStates = dynamicStates.data() };
+        vk::PipelineViewportStateCreateInfo viewportCreateInfo {
+            .viewportCount = 1,
+            .pViewports = nullptr,
+            .scissorCount = 1,
+            .pScissors = nullptr };
+
+        vk::PipelineMultisampleStateCreateInfo multisamplingCreateInfo = Pipeline::createMultisampling( vk::SampleCountFlagBits::e1 );
+        multisamplingCreateInfo.minSampleShading = 1.0f;
+        multisamplingCreateInfo.sampleShadingEnable = vk::False;
+
+        std::array<vk::PipelineShaderStageCreateInfo, 2> programmableShaderStages{};
+
+
+        vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo {
+            .setLayoutCount = static_cast<uint32_t>(descriptorLayouts.size()),
+            .pSetLayouts = descriptorLayouts.data() };
+
+        vk::raii::PipelineLayout pipelineLayout ( device, pipelineLayoutCreateInfo );
+
+        vk::GraphicsPipelineCreateInfo graphicsCreateInfo {
+            .stageCount          = static_cast<uint32_t>(programmableShaderStages.size()),
+            .pStages             = programmableShaderStages.data(),
+            .pInputAssemblyState = &inputAssemblyCreateInfo,
+            .pViewportState      = &viewportCreateInfo,
+            .pRasterizationState = &rasterizationCreateInfo,
+            .pMultisampleState   = &multisamplingCreateInfo,
+            .pDepthStencilState  = &depthStencilCreateInfo,
+            .pColorBlendState    = &colorBlendCreateInfo,
+            .pDynamicState       = nullptr,
+            .layout              = pipelineLayout,
+            .renderPass          = nullptr };
+
+        auto bindingDescription    = ShadowVertex::getBindingDescription();
+        auto attributeDescriptions = ShadowVertex::getAttributeDescriptions();
+        vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
+            .vertexBindingDescriptionCount   = 1, .pVertexBindingDescriptions = &bindingDescription,
+            .vertexAttributeDescriptionCount = static_cast<uint32_t>( attributeDescriptions.size() ), .pVertexAttributeDescriptions = attributeDescriptions.data() };
+        graphicsCreateInfo.pVertexInputState = &vertexInputInfo;
+
+        vk::raii::ShaderModule shaderModule = PipelineUtils::createShaderModule( device, "../../shaders/shadow_screen_vertex.spv" );
+        vk::PipelineShaderStageCreateInfo vertexShader_StageInfo_onscreen {
+            .stage = vk::ShaderStageFlagBits::eVertex,
+            .module = shaderModule,
+            .pName = "vertMain" };
+        programmableShaderStages[0] = vertexShader_StageInfo_onscreen;
+
+
 
     }
 

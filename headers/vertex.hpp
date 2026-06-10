@@ -41,6 +41,20 @@ struct TextureVertex
     { return base == other.base && color == other.color && textureCoords == other.textureCoords; }
 };
 
+struct ShadowVertex
+{
+    BaseVertexAttributes base;
+    glm::vec3 color;
+    glm::vec2 textureCoords;
+    glm::vec3 normal; // This is how shadows are created.
+
+
+    ShadowVertex() = default;
+
+    static vk::VertexInputBindingDescription getBindingDescription();
+    static std::array<vk::VertexInputAttributeDescription, 4> getAttributeDescriptions();
+};
+
 // god i hate the lack of inheritance
 namespace std
 {
