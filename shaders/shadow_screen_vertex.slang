@@ -28,7 +28,7 @@ struct VSOutput
     float3 outColor;
     float3 outViewVec;
     float3 outLightVec;
-    float3 outShadowCoord;
+    float4 outShadowCoord;
 };
 
 // This is used to convert GPU outputted coordinates from CLIP SPACE (Window: [-1.0 to 1.0]) into TEXTURE COORDINATES, where depth maps have values ranging from [0.0 to 1.0]
@@ -54,7 +54,7 @@ VSOutput vertMain(VSInput input)
     float4 pos = mul(ubo.model, float4(input.inPosition, 1.0));
     output.outViewVec = -pos.xyz;
 
-    output.outShadowCoord = (mul( mul(biasMatrix, ubo.depthBiasMVP), float4(input.inPosition, 1.0) )).xyz;
+    output.outShadowCoord = (mul( mul(biasMatrix, ubo.depthBiasMVP), float4(input.inPosition, 1.0) ));
     // In the code snippet, he multiplies the biasMatrix * uboDepth by an identity matrix, 1x1, which is PROBABLY an error.
     // So, we just multiply everything as he does, minus the ubo.model, which in his case is an identity matrix.
     // He also renames depthBiasMVP to LightSpace.

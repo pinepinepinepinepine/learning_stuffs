@@ -257,8 +257,14 @@ class LightingSystem
             1,
             vk::ShaderStageFlagBits::eFragment,
             nullptr );
+        vk::DescriptorSetLayoutBinding mapLayoutBinding(
+            2,
+            vk::DescriptorType::eSampledImage,
+            1,
+            vk::ShaderStageFlagBits::eFragment,
+            nullptr );
 
-        std::vector<vk::DescriptorSetLayoutBinding> layoutBindings { uboLayoutBinding, samplerLayoutBinding };
+        std::vector<vk::DescriptorSetLayoutBinding> layoutBindings { uboLayoutBinding, samplerLayoutBinding, mapLayoutBinding };
         depthRenderPass.descriptor.createDescriptorSetLayout( device, layoutBindings ); // Render technically has the sampler in its blueprint, but we are ignoring it.
         shadowRenderPass.descriptor.createDescriptorSetLayout( device, layoutBindings );
 
@@ -273,6 +279,7 @@ class LightingSystem
             // Onscreen
             shadowRenderPass.descriptor.setBufferResource( device, shadowRenderPass.onscreen_Buffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(OnscreenBuffer), i, 0 );
             shadowRenderPass.descriptor.setSamplerResource( device, depthRenderPass.depthSampler, depthRenderPass.depthShadowMapAttachment.imageView, i, 1 );
+            shadowRenderPass.descriptor.setSampledImageResource( device, depthRenderPass.depthShadowMapAttachment.imageView, i, 2 );
         }
 
         createPipelines( device, { depthRenderPass.descriptor.descriptorSetLayout } );

@@ -7,3 +7,4 @@ C:/VulkanSDK/1.4.341.1/Bin/slangc.exe test.slang -target spirv -profile spirv_1_
 C:/VulkanSDK/1.4.341.1/Bin/slangc.exe wireframe.slang -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name -entry vertMain -entry fragMain -o wireframe.spv
 
 C:/VulkanSDK/1.4.341.1/Bin/slangc.exe shadow_screen_vertex.slang -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name -entry vertMain -o shadow_screen_vertex.spv
+C:/VulkanSDK/1.4.341.1/Bin/slangc.exe shadow_screen_fragment.slang -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name -entry fragMain -o shadow_screen_fragment.spv

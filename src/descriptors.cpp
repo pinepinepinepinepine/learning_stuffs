@@ -84,3 +84,21 @@ void Descriptor::setSamplerResource(
 
     device.updateDescriptorSets( samplerDescriptorWrite, {} );
 }
+
+void Descriptor::setSampledImageResource( const vk::raii::Device& device, const vk::ImageView& textureImageView, size_t descriptorSetIndex, uint32_t binding )
+{
+    vk::DescriptorImageInfo sampledImageInfo {
+        .sampler = nullptr, // we are solely providing the image itself, not a sampler.
+        .imageView = textureImageView,
+        .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+
+    vk::WriteDescriptorSet sampledImageDescriptorWrite {
+        .dstSet = descriptorSets[descriptorSetIndex],
+        .dstBinding = binding,
+        .dstArrayElement = 0,
+        .descriptorCount = 1,
+        .descriptorType = vk::DescriptorType::eSampledImage,
+        .pImageInfo = &sampledImageInfo };
+
+    device.updateDescriptorSets( sampledImageDescriptorWrite, {} );
+}
