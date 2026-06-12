@@ -1,3 +1,4 @@
+#pragma once
 #include "../../headers/includes.hpp"
 
 // Serves as a central way where we store ANY kind of resources: whether it be models, textures, etc.

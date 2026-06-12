@@ -14,6 +14,7 @@
 #include "thread.hpp"
 #include "../componentAbstractions/headers/resourceManager.hpp"
 #include "../componentAbstractions/headers/cullingSystem.hpp"
+#include "../componentAbstractions/headers/offscreenShadowMap.hpp"
 
 constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -78,6 +79,8 @@ struct RenderApplication
     std::vector<Entity*> allEntities;
 
     CullingSystem cullSystem;
+
+    LightingSystem lightSystem;
 
     void setup();
     void createVertexGraphicsPipeline();

@@ -136,7 +136,7 @@ function (add_slang_wireframe_shader_target TARGET)
           COMMAND "${SLANG}/bin/slangc.exe" ${SHADER_SOURCES} -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o ${SHADERS_DIR}/wireframe.spv
           WORKING_DIRECTORY ${SHADERS_DIR}
           DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
-          COMMENT "Compiling Slang Wireframe raphic Shaders"
+          COMMENT "Compiling Slang Wireframe Graphic Shaders"
           VERBATIM
   )
   add_custom_target (${TARGET} DEPENDS ${SHADERS_DIR}/wireframe.spv)
@@ -144,3 +144,79 @@ endfunction()
 
 add_slang_wireframe_shader_target( wireframe_shaders )
 add_dependencies(main wireframe_shaders)
+
+function (add_slang_shadow_shader_target TARGET)
+  cmake_parse_arguments ("SHADER" "" "" "SOURCES" ${ARGN})
+  set (SHADERS_DIR ${CMAKE_CURRENT_LIST_DIR}/shaders)
+  set (ENTRY_POINTS -entry vertMain)
+  set (SHADER_SOURCES ${SHADERS_DIR}/shadow_screen_vertex.slang)
+  add_custom_command (
+          OUTPUT ${SHADERS_DIR}
+          COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADERS_DIR}
+  )
+  add_custom_command (
+          OUTPUT  ${SHADERS_DIR}/shadow_screen_vertex.spv
+          COMMAND cmd /c ${SHADERS_DIR}/compile.bat # for some reason the slang compiler below is... whatever.
+          COMMAND "${SLANG}/bin/slangc.exe" ${SHADER_SOURCES} -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o ${SHADERS_DIR}/shadow_screen_vertex.spv
+          WORKING_DIRECTORY ${SHADERS_DIR}
+          DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
+          COMMENT "Compiling Slang Vertex Shadow Graphic Shaders"
+          VERBATIM
+  )
+  add_custom_target (${TARGET} DEPENDS ${SHADERS_DIR}/shadow_screen_vertex.spv)
+endfunction()
+
+add_slang_shadow_shader_target( shadow_vert_shaders )
+add_dependencies(main shadow_vert_shaders)
+
+
+function (add_slang_shadow_frag_shader_target TARGET)
+  cmake_parse_arguments ("SHADER" "" "" "SOURCES" ${ARGN})
+  set (SHADERS_DIR ${CMAKE_CURRENT_LIST_DIR}/shaders)
+  set (ENTRY_POINTS -entry fragMain)
+  set (SHADER_SOURCES ${SHADERS_DIR}/shadow_screen_fragment.slang)
+  add_custom_command (
+          OUTPUT ${SHADERS_DIR}
+          COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADERS_DIR}
+  )
+  add_custom_command (
+          OUTPUT  ${SHADERS_DIR}/shadow_screen_fragment.spv
+          COMMAND cmd /c ${SHADERS_DIR}/compile.bat # for some reason the slang compiler below is... whatever.
+          COMMAND "${SLANG}/bin/slangc.exe" ${SHADER_SOURCES} -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o ${SHADERS_DIR}/shadow_screen_fragment.spv
+          WORKING_DIRECTORY ${SHADERS_DIR}
+          DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
+          COMMENT "Compiling Slang Fragment Shadow Graphic Shaders"
+          VERBATIM
+  )
+  add_custom_target (${TARGET} DEPENDS ${SHADERS_DIR}/shadow_screen_fragment.spv)
+endfunction()
+
+add_slang_shadow_frag_shader_target( shadow_frag_shaders )
+add_dependencies(main shadow_frag_shaders)
+
+
+function (add_slang_shadow_off_shader_target TARGET)
+  cmake_parse_arguments ("SHADER" "" "" "SOURCES" ${ARGN})
+  set (SHADERS_DIR ${CMAKE_CURRENT_LIST_DIR}/shaders)
+  set (ENTRY_POINTS -entry vertMain)
+  set (SHADER_SOURCES ${SHADERS_DIR}/shadow_offscreen_vertex.slang)
+  add_custom_command (
+          OUTPUT ${SHADERS_DIR}
+          COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADERS_DIR}
+  )
+  add_custom_command (
+          OUTPUT  ${SHADERS_DIR}/shadow_offscreen_vertex.spv
+          COMMAND cmd /c ${SHADERS_DIR}/compile.bat # for some reason the slang compiler below is... whatever.
+          COMMAND "${SLANG}/bin/slangc.exe" ${SHADER_SOURCES} -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name ${ENTRY_POINTS} -o ${SHADERS_DIR}/shadow_offscreen_vertex.spv
+          WORKING_DIRECTORY ${SHADERS_DIR}
+          DEPENDS ${SHADERS_DIR} ${SHADER_SOURCES}
+          COMMENT "Compiling Slang Offscreen Shadow Graphic Shaders"
+          VERBATIM
+  )
+  add_custom_target (${TARGET} DEPENDS ${SHADERS_DIR}/shadow_offscreen_vertex.spv)
+endfunction()
+
+add_slang_shadow_off_shader_target( shadow_off_shaders )
+add_dependencies(main shadow_off_shaders)
+
+#clean this garbage up to not be the same thing 100 times.

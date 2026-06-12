@@ -1,3 +1,5 @@
+#pragma once
+
 //#include "component.hpp"
 #include "../../headers/includes.hpp"
 #include "../../headers/model.hpp"

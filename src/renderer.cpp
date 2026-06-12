@@ -40,6 +40,12 @@ void RenderApplication::setup()
     createCatEntity();
     allEntities.push_back( &cat );
     cullSystem.setCamera( camera.GetComponent<CameraComponent>() );
+
+    lightSystem.setDevice( &device );
+    lightSystem.createOffscreenRenderPass();
+    lightSystem.createOffscreenFrameBuffer();
+    lightSystem.createBuffers( MAX_FRAMES_IN_FLIGHT );
+    lightSystem.createDescriptors( descriptorPool, MAX_FRAMES_IN_FLIGHT );
 }
 
 void RenderApplication::createTextures()
@@ -297,8 +303,15 @@ void RenderApplication::createDescriptorPool()
     // Wireframe
     vk::DescriptorPoolSize wire_uboPoolSize( vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT );
 
-    std::vector<vk::DescriptorPoolSize> poolSize { uboPoolSize, samplerPoolSize, debugUBOPoolSize, particleStoragePoolSize, particleUBOPoolSize, particleDebugPoolSize, particleGraphicsDebugPoolSize, wire_uboPoolSize };
-    descriptorPool = DescriptorPool::createDescriptorPool( device.logicalDevice, poolSize, MAX_FRAMES_IN_FLIGHT * 4 ); // *2 because of models + particles, a distinct set per. check if right.
+    // Shadow
+    vk::DescriptorPoolSize shadow_uboPoolSize( vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT * 2 );
+    vk::DescriptorPoolSize shadow_samplerPoolSize( vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT * 2 );
+    vk::DescriptorPoolSize shadow_sampledImagePoolSize( vk::DescriptorType::eSampledImage, MAX_FRAMES_IN_FLIGHT * 2 );
+
+    std::vector<vk::DescriptorPoolSize> poolSize {
+        uboPoolSize, samplerPoolSize, debugUBOPoolSize, particleStoragePoolSize, particleUBOPoolSize, particleDebugPoolSize, particleGraphicsDebugPoolSize, wire_uboPoolSize,
+        shadow_uboPoolSize, shadow_samplerPoolSize, shadow_sampledImagePoolSize };
+    descriptorPool = DescriptorPool::createDescriptorPool( device.logicalDevice, poolSize, MAX_FRAMES_IN_FLIGHT * 6 ); // *2 because of models + particles, a distinct set per. check if right.
 }
 
 void RenderApplication::createModelDescriptors()

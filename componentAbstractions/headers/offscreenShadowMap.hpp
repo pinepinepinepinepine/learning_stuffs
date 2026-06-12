@@ -1,3 +1,5 @@
+#pragma once
+
 #include "includes.hpp"
 #include "entity.hpp"
 #include "../../headers/image.hpp"
@@ -15,7 +17,8 @@
 
 
 // Fix this. Redefinition. This is for offscreen's GPU buffers.
-struct mvpUBOBuffer {
+// Maybe it's a better idea to calculate the * MVP to save the GPU from doing it? IT IS. REFACTOR AFTER COMPLETION.
+struct mvpBuffer {
     glm::mat4 model;
     glm::mat4 view;
     glm::mat4 proj;
@@ -36,11 +39,11 @@ struct OnscreenBuffer
 
 struct OffscreenPass
 {
-    int32_t width, height;
-    VkFramebuffer frameBuffer;
+    uint32_t width, height;
+    vk::raii::Framebuffer frameBuffer = nullptr;
     Image depthShadowMapAttachment;
-    VkRenderPass renderPass;
-    VkSampler depthSampler;
+    vk::raii::RenderPass renderPass = nullptr;
+    vk::raii::Sampler depthSampler = nullptr;
     Descriptor descriptor;
 
     std::vector<GPUBuffer> offscreen_Buffers;
@@ -53,6 +56,7 @@ struct OnscreenPass
     Descriptor descriptor;
     std::vector<GPUBuffer> onscreen_Buffers;
     Pipeline shadowPassPipeline;
+    vk::raii::RenderPass renderPass = nullptr;
 };
 
 
@@ -64,7 +68,21 @@ class LightingSystem
 
     OnscreenPass shadowRenderPass;
 
-    void createOffscreenRenderPass( const vk::raii::Device& device )
+    vk::raii::PipelineLayout pipelineLayout { VK_NULL_HANDLE };
+
+    LogicalDevice* device;
+
+    public:
+
+    void setDevice( LogicalDevice* d ) { device = d; }
+
+    ~LightingSystem()
+    {
+        // Tutorial uses a cool destructor instead of a cleanup function -- might be handy to remove the cleanup function within runtime/renderer to a destructor!
+        depthRenderPass.depthShadowMapAttachment.cleanupImage( device->logicalDevice );
+    }
+
+    void createOffscreenRenderPass()
     {
         vk::AttachmentDescription attachmentDescription {
             .format = vk::Format::eD16Unorm,
@@ -80,7 +98,7 @@ class LightingSystem
             .attachment = 0,
             .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal }; // Attachment will be used as depth/stencil during render pass
 
-        // Subpasses are deprecated due to dynamic rendering being favoured, and so subpasses are also... GONE!
+        // Subpasses are deprecated due to dynamic rendering being favoured, and so subpasses are also... GONE! Theyre essentially pipeline barriers.
         // Whenever we finish the base, switch to dynamic rendering.
         vk::SubpassDescription subpass {
             .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
@@ -123,14 +141,20 @@ class LightingSystem
             .dependencyCount = static_cast<uint32_t>(dependencies.size()),
             .pDependencies = dependencies.data() };
 
-        depthRenderPass.renderPass = *vk::raii::RenderPass(device, renderPassCreateInfo );
+        depthRenderPass.renderPass = vk::raii::RenderPass(device->logicalDevice, renderPassCreateInfo );
+    }
+
+    // https://github.com/SaschaWillems/Vulkan/blob/master/base/vulkanexamplebase.cpp -- Onscreen Renderpass: setupRenderPass()
+    void createOnscreenRenderPass()
+    {
+
     }
 
     // Anyways, even though it's gonna get axe'd whenever we're switching to dynamic rendering, a framebuffer is just the underlying image where we draw the image to.
     // In this case, it's just a vkImage that houses depth values per pixel.
 
         // We can just use Image::createImage, but whatever, just being explicit -- this is getting removed anyway.
-    void createOffscreenFrameBuffer( const LogicalDevice& device )
+    void createOffscreenFrameBuffer()
     {
         depthRenderPass.width = 2048;
         depthRenderPass.height = 2048;
@@ -145,16 +169,16 @@ class LightingSystem
             .samples = vk::SampleCountFlagBits::e1,
             .tiling = vk::ImageTiling::eOptimal,
             .usage = vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled };
-        vkCreateImage( *device.logicalDevice, imageCreateInfo, nullptr, &depthRenderPass.depthShadowMapAttachment.image );
+        vkCreateImage( *device->logicalDevice, imageCreateInfo, nullptr, &depthRenderPass.depthShadowMapAttachment.image );
 
         // Underlying Memory of Image
         vk::MemoryRequirements memRequirements {};
-        vkGetImageMemoryRequirements( *device.logicalDevice, depthRenderPass.depthShadowMapAttachment.image, memRequirements );
+        vkGetImageMemoryRequirements( *device->logicalDevice, depthRenderPass.depthShadowMapAttachment.image, memRequirements );
         vk::MemoryAllocateInfo allocInfo {
             .allocationSize = memRequirements.size,
-            .memoryTypeIndex = GPUMemoryObject::findGPUBufferMemoryType( device.physicalDevice, memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal ) };
-        depthRenderPass.depthShadowMapAttachment.gpuMemory = vk::raii::DeviceMemory( device.logicalDevice, allocInfo );
-        vkBindImageMemory( *device.logicalDevice, depthRenderPass.depthShadowMapAttachment.image, *depthRenderPass.depthShadowMapAttachment.gpuMemory, 0 );
+            .memoryTypeIndex = GPUMemoryObject::findGPUBufferMemoryType( device->physicalDevice, memRequirements.memoryTypeBits, vk::MemoryPropertyFlagBits::eDeviceLocal ) };
+        depthRenderPass.depthShadowMapAttachment.gpuMemory = vk::raii::DeviceMemory( device->logicalDevice, allocInfo );
+        vkBindImageMemory( *device->logicalDevice, depthRenderPass.depthShadowMapAttachment.image, *depthRenderPass.depthShadowMapAttachment.gpuMemory, 0 );
 
         // Image View to Access it
         vk::ImageViewCreateInfo depthStencilImageViewCreateInfo {
@@ -168,7 +192,7 @@ class LightingSystem
                 .baseArrayLayer = 0,
                 .layerCount = 1 }
         };
-        depthRenderPass.depthShadowMapAttachment.imageView = vk::raii::ImageView( device.logicalDevice, depthStencilImageViewCreateInfo );
+        depthRenderPass.depthShadowMapAttachment.imageView = vk::raii::ImageView( device->logicalDevice, depthStencilImageViewCreateInfo );
 
         // RenderApplication::createTextureSampler() -- Creates the sampler of the depth image so we can actually do something with it -- tells the GPU how to "SAMPLE" the depth image's depth values.
         vk::SamplerCreateInfo samplerInfo {
@@ -183,9 +207,7 @@ class LightingSystem
         samplerInfo.mipLodBias = 0.0f;
         samplerInfo.minLod = 0.0f;
         samplerInfo.maxLod = 1.0f;
-        depthRenderPass.depthSampler = *vk::raii::Sampler( device.logicalDevice, samplerInfo );
-
-        createOffscreenRenderPass( device.logicalDevice ); // Probs separate the function call elsewhere; in renderer.cpp (I suppose), call createOffscreenRenderPass() -> createOffscreenFrameBuffer() manually -- neater
+        depthRenderPass.depthSampler = vk::raii::Sampler( device->logicalDevice, samplerInfo );
 
         vk::ImageView imageView = *depthRenderPass.depthShadowMapAttachment.imageView;
         // Creates the framebuffer for where our depth image is actually stored
@@ -200,13 +222,13 @@ class LightingSystem
             .width = depthRenderPass.width,
             .height = depthRenderPass.height,
             .layers = 1 };
-        depthRenderPass.frameBuffer = *vk::raii::Framebuffer( device.logicalDevice, framebufferCreateInfo );
+        depthRenderPass.frameBuffer = vk::raii::Framebuffer( device->logicalDevice, framebufferCreateInfo );
     }
     // Dynamic Rendering ELIMINATES having to create framebuffers and render passes manually -- WHENEVER WE SWITCH TO DYNAMIC, AXE EM!
 
 
     // Creating custom descriptors and pipelines for creating depth images.
-    void createBuffers( const LogicalDevice& device, const int& buffersToCreate )
+    void createBuffers( const int& buffersToCreate )
     {
         depthRenderPass.offscreen_Buffers.clear();
         shadowRenderPass.onscreen_Buffers.clear();
@@ -216,8 +238,8 @@ class LightingSystem
             // Offscreen
             GPUBuffer off_individualBuffer;
             off_individualBuffer.createGPUBuffer(
-                device,
-                sizeof(mvpUBOBuffer),
+                *device,
+                sizeof(mvpBuffer),
                 vk::BufferUsageFlagBits::eUniformBuffer,
                 vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
                 true );
@@ -226,7 +248,7 @@ class LightingSystem
             // Onscreen
             GPUBuffer on_individualBuffer;
             on_individualBuffer.createGPUBuffer(
-                device,
+                *device,
                 sizeof(OnscreenBuffer),
                 vk::BufferUsageFlagBits::eUniformBuffer,
                 vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent,
@@ -236,7 +258,7 @@ class LightingSystem
     }
 
     // I seriously have to abstract this to not have to retype the same garbage after the 100th time -- rendergraphs are the solution?
-    void createDescriptors( vk::raii::DescriptorPool& pool, vk::raii::Device& device, const int& sets ) // Don't forget to assign more space to the pool in renderer.cpp
+    void createDescriptors( vk::raii::DescriptorPool& pool, const int& sets ) // Don't forget to assign more space to the pool in renderer.cpp
     {
         // Reusing the descriptor pool because it's more efficient: Hence, passing it.
         depthRenderPass.descriptor.setDescriptorsPool( pool );
@@ -265,32 +287,33 @@ class LightingSystem
             nullptr );
 
         std::vector<vk::DescriptorSetLayoutBinding> layoutBindings { uboLayoutBinding, samplerLayoutBinding, mapLayoutBinding };
-        depthRenderPass.descriptor.createDescriptorSetLayout( device, layoutBindings ); // Render technically has the sampler in its blueprint, but we are ignoring it.
-        shadowRenderPass.descriptor.createDescriptorSetLayout( device, layoutBindings );
+        depthRenderPass.descriptor.createDescriptorSetLayout( device->logicalDevice, layoutBindings ); // Render technically has the sampler in its blueprint, but we are ignoring it.
+        shadowRenderPass.descriptor.createDescriptorSetLayout( device->logicalDevice, layoutBindings );
 
-        depthRenderPass.descriptor.createEmptyDescriptorSets( device, sets );
-        shadowRenderPass.descriptor.createEmptyDescriptorSets( device, sets );
+        depthRenderPass.descriptor.createEmptyDescriptorSets( device->logicalDevice, sets );
+        shadowRenderPass.descriptor.createEmptyDescriptorSets( device->logicalDevice, sets );
 
         for ( int i = 0; i < sets; i++ )
         {
             // Offscreen: this chooses to ignore binding 1 (even though we specified in the blueprint) -- it's perfectly okay like this.
-            depthRenderPass.descriptor.setBufferResource( device, depthRenderPass.offscreen_Buffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(mvpUBOBuffer), i, 0 );
+            depthRenderPass.descriptor.setBufferResource( device->logicalDevice, depthRenderPass.offscreen_Buffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(mvpBuffer), i, 0 );
 
             // Onscreen
-            shadowRenderPass.descriptor.setBufferResource( device, shadowRenderPass.onscreen_Buffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(OnscreenBuffer), i, 0 );
-            shadowRenderPass.descriptor.setSamplerResource( device, depthRenderPass.depthSampler, depthRenderPass.depthShadowMapAttachment.imageView, i, 1 );
-            shadowRenderPass.descriptor.setSampledImageResource( device, depthRenderPass.depthShadowMapAttachment.imageView, i, 2 );
+            shadowRenderPass.descriptor.setBufferResource( device->logicalDevice, shadowRenderPass.onscreen_Buffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(OnscreenBuffer), i, 0 );
+            shadowRenderPass.descriptor.setSamplerResource( device->logicalDevice, depthRenderPass.depthSampler, depthRenderPass.depthShadowMapAttachment.imageView, i, 1 );
+            shadowRenderPass.descriptor.setSampledImageResource( device->logicalDevice, depthRenderPass.depthShadowMapAttachment.imageView, i, 2 );
         }
 
-        createPipelines( device, { depthRenderPass.descriptor.descriptorSetLayout } );
+        createPipelines( { depthRenderPass.descriptor.descriptorSetLayout } );
     }
 
-    void createPipelines( vk::raii::Device& device, const std::vector<vk::DescriptorSetLayout>& descriptorLayouts )
+    void createPipelines( const std::vector<vk::DescriptorSetLayout>& descriptorLayouts )
     {
         // Generic, shared.
         vk::PipelineInputAssemblyStateCreateInfo inputAssemblyCreateInfo { .topology = vk::PrimitiveTopology::eTriangleList };
-
         vk::PipelineRasterizationStateCreateInfo rasterizationCreateInfo = Pipeline::createRasterizer();
+
+        std::array<vk::PipelineShaderStageCreateInfo, 2> programmableShaderStages{};
 
         vk::PipelineColorBlendAttachmentState colorBlendAttachment { // Need to pass this because otherwise createInfo'll house a dangling reference. Probably make this a static return.
             .blendEnable         = vk::True,
@@ -308,6 +331,7 @@ class LightingSystem
 
         std::vector<vk::DynamicState> dynamicStates { vk::DynamicState::eViewport, vk::DynamicState::eScissor };
         vk::PipelineDynamicStateCreateInfo dynamicStatesCreateInfo {
+            .sType = vk::StructureType::ePipelineDynamicStateCreateInfo,
             .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
             .pDynamicStates = dynamicStates.data() };
         vk::PipelineViewportStateCreateInfo viewportCreateInfo {
@@ -320,15 +344,13 @@ class LightingSystem
         multisamplingCreateInfo.minSampleShading = 1.0f;
         multisamplingCreateInfo.sampleShadingEnable = vk::False;
 
-        std::array<vk::PipelineShaderStageCreateInfo, 2> programmableShaderStages{};
-
-
         vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo {
             .setLayoutCount = static_cast<uint32_t>(descriptorLayouts.size()),
             .pSetLayouts = descriptorLayouts.data() };
 
-        vk::raii::PipelineLayout pipelineLayout ( device, pipelineLayoutCreateInfo );
+        pipelineLayout = vk::raii::PipelineLayout( device->logicalDevice, pipelineLayoutCreateInfo );
 
+        // We modify this later on a per pipeline basis: they're pointers, so it works.
         vk::GraphicsPipelineCreateInfo graphicsCreateInfo {
             .stageCount          = static_cast<uint32_t>(programmableShaderStages.size()),
             .pStages             = programmableShaderStages.data(),
@@ -338,10 +360,13 @@ class LightingSystem
             .pMultisampleState   = &multisamplingCreateInfo,
             .pDepthStencilState  = &depthStencilCreateInfo,
             .pColorBlendState    = &colorBlendCreateInfo,
-            .pDynamicState       = nullptr,
+            .pDynamicState       = &dynamicStatesCreateInfo,
             .layout              = pipelineLayout,
             .renderPass          = nullptr };
 
+
+        // On screen:
+        std::cout << "beginning onscreen creation!\n";
         auto bindingDescription    = ShadowVertex::getBindingDescription();
         auto attributeDescriptions = ShadowVertex::getAttributeDescriptions();
         vk::PipelineVertexInputStateCreateInfo vertexInputInfo {
@@ -349,15 +374,69 @@ class LightingSystem
             .vertexAttributeDescriptionCount = static_cast<uint32_t>( attributeDescriptions.size() ), .pVertexAttributeDescriptions = attributeDescriptions.data() };
         graphicsCreateInfo.pVertexInputState = &vertexInputInfo;
 
-        vk::raii::ShaderModule shaderModule = PipelineUtils::createShaderModule( device, "../../shaders/shadow_screen_vertex.spv" );
+        vk::raii::ShaderModule vertShaderModule = PipelineUtils::createShaderModule( device->logicalDevice, "../shaders/shadow_screen_vertex.spv" );
         vk::PipelineShaderStageCreateInfo vertexShader_StageInfo_onscreen {
             .stage = vk::ShaderStageFlagBits::eVertex,
-            .module = shaderModule,
+            .module = vertShaderModule,
             .pName = "vertMain" };
+        vk::raii::ShaderModule fragShaderModule = PipelineUtils::createShaderModule( device->logicalDevice, "../shaders/shadow_screen_fragment.spv" );
+        vk::PipelineShaderStageCreateInfo fragShader_StageInfo_onscreen {
+            .stage = vk::ShaderStageFlagBits::eFragment,
+            .module = fragShaderModule,
+            .pName = "fragMain" };
+
         programmableShaderStages[0] = vertexShader_StageInfo_onscreen;
+        programmableShaderStages[1] = fragShader_StageInfo_onscreen;
+
+        // To have a option to enable PCF in the CPU instead of hard coding it in the GPU -- it's like a push constant, but you set it at pipeline creation.
+            // you cannot modify it after pipeline creation -- it's const as const can be. set it at pipeline creation and thats it.
+        vk::Bool32 enablePCF = vk::False;
+        vk::SpecializationMapEntry constantIDEntry {
+            .constantID = 0,
+            .offset = 0,
+            .size = sizeof(vk::Bool32) };
+        vk::SpecializationInfo constantIDInfo {
+            .mapEntryCount = 1,
+            .pMapEntries = &constantIDEntry,
+            .dataSize = sizeof(vk::Bool32),
+            .pData = &enablePCF };
+        programmableShaderStages[1].pSpecializationInfo = &constantIDInfo;
+
+        // IF WE WANT TO CREATE OPTIONS, WE NEED TO CREATE 2 PIPELINES, HENCE WHY SASCHA CREATES 2 OF THE SAME PIPELINES, BUT ONE OF THEM HAS IT ENABLED
+        // SINCE WE CANT CHANGE IT ON THE FLY (ITS IMMUTABLE), WE CREATE 2
+        // PipelineCache (second param) is already compiled .spv pipeline/shader files -- it reuses the old, already existing pipelines so we don't have to recreate it whenever we are switching between pipelines
+        // We can just use the already existing one.
+        shadowRenderPass.shadowPassPipeline.pipeline = vk::raii::Pipeline( device->logicalDevice, nullptr, graphicsCreateInfo );
 
 
 
+        // Offscreen:
+        std::cout << "beginning offscreen creation!\n";
+        vertexInputInfo.vertexAttributeDescriptionCount = 1;
+
+        vk::raii::ShaderModule vertShaderModule_offscreen = PipelineUtils::createShaderModule( device->logicalDevice, "../shaders/shadow_offscreen_vertex.spv" );
+        vk::PipelineShaderStageCreateInfo vertexShader_StageInfo_offscreen {
+            .stage = vk::ShaderStageFlagBits::eVertex,
+            .module = vertShaderModule_offscreen,
+            .pName = "vertMain" };
+        programmableShaderStages[0] = vertexShader_StageInfo_offscreen;
+        graphicsCreateInfo.stageCount = 1;
+
+        colorBlendCreateInfo.attachmentCount = 0; // No blend attachment states (no color attachments used)
+
+        rasterizationCreateInfo.cullMode = vk::CullModeFlagBits::eNone;
+        rasterizationCreateInfo.depthBiasEnable = vk::True; // Enable depth bias
+        depthStencilCreateInfo.depthCompareOp = vk::CompareOp::eLessOrEqual; // This line is useless because it's already less or equal.
+
+        // Add depth bias to dynamic state, so we can change it at runtime
+        dynamicStates.push_back( vk::DynamicState::eDepthBias );
+        dynamicStatesCreateInfo = vk::PipelineDynamicStateCreateInfo {
+            .sType = vk::StructureType::ePipelineDynamicStateCreateInfo,
+            .dynamicStateCount = static_cast<uint32_t>(dynamicStates.size()),
+            .pDynamicStates = dynamicStates.data() };
+
+        graphicsCreateInfo.renderPass = depthRenderPass.renderPass;
+        depthRenderPass.depthMapPipeline.pipeline = vk::raii::Pipeline( device->logicalDevice, nullptr, graphicsCreateInfo );
     }
 
     // fuck this. probs a better way.

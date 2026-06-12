@@ -49,7 +49,7 @@ float textureProjection(float4 pixelCoordinate, float2 positionOffset)
 // Percentage-Closer Filtring (PCF) is like antialiasing but for shadows, where it sees the neighbouring depth values to compute a pixel's final depth value
 // This is useful because otherwise, similarily with antialiasing, the absence of considering neighbouring pixels makes the shadow's edges VERY sharp -- it goes from shadow to full light, making the shadow blocky.
 // https://developer.nvidia.com/gpugems/gpugems/part-ii-lighting-and-shadows/chapter-11-shadow-map-antialiasing -- see Figure 11.6-8
-const static bool enable_PCF = false;
+[[vk::constant_id(0)]]const bool enable_PCF = false; // Constant ID is an alternative to pass CPU data over into the GPU without a uniform buffer ON PIPELINE CREATION.
 float computeShadow_PCF( float4 pixelCoordinate )
 {
     uint imageWidth;

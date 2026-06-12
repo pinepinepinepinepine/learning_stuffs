@@ -1,3 +1,5 @@
+#pragma once
+
 #include "../../headers/includes.hpp"
 
 class Entity;
