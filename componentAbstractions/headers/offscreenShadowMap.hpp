@@ -143,13 +143,6 @@ class LightingSystem
 
         depthRenderPass.renderPass = vk::raii::RenderPass(device->logicalDevice, renderPassCreateInfo );
     }
-
-    // https://github.com/SaschaWillems/Vulkan/blob/master/base/vulkanexamplebase.cpp -- Onscreen Renderpass: setupRenderPass()
-    void createOnscreenRenderPass()
-    {
-
-    }
-
     // Anyways, even though it's gonna get axe'd whenever we're switching to dynamic rendering, a framebuffer is just the underlying image where we draw the image to.
     // In this case, it's just a vkImage that houses depth values per pixel.
 
@@ -225,6 +218,86 @@ class LightingSystem
         depthRenderPass.frameBuffer = vk::raii::Framebuffer( device->logicalDevice, framebufferCreateInfo );
     }
     // Dynamic Rendering ELIMINATES having to create framebuffers and render passes manually -- WHENEVER WE SWITCH TO DYNAMIC, AXE EM!
+
+        // https://github.com/SaschaWillems/Vulkan/blob/master/base/vulkanexamplebase.cpp -- Onscreen Renderpass: setupRenderPass()
+
+    // A renderpass is basically an introduction to what the GPU can expect when some resource runs thru the shader/pipeline
+    // It specifies the kind of images itll write to, what those image transitions may be, and dependencies it needs
+    // It's essentially saying "Hey, this job will do this"
+    void createOnscreenRenderPass( const vk::Format& colorFormat, const vk::Format& depthFormat )
+    {
+        vk::AttachmentDescription colourAttachment {
+            .format = colorFormat,
+            .samples = vk::SampleCountFlagBits::e1,
+            .loadOp = vk::AttachmentLoadOp::eClear,
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
+			.stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+			.initialLayout = vk::ImageLayout::eUndefined,
+			.finalLayout = vk::ImageLayout::ePresentSrcKHR
+        };
+
+        vk::AttachmentDescription depthAttachment {
+            .format = depthFormat,
+            .samples = vk::SampleCountFlagBits::e1,
+            .loadOp = vk::AttachmentLoadOp::eClear,
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .stencilLoadOp = vk::AttachmentLoadOp::eClear,
+			.stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
+			.initialLayout = vk::ImageLayout::eUndefined,
+			.finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal
+        };
+
+        // What this render pass' attachments will be
+        std::array<vk::AttachmentDescription, 2> attachments { colourAttachment, depthAttachment };
+
+        vk::AttachmentReference colourReference { .attachment = 0, .layout = vk::ImageLayout::eColorAttachmentOptimal };
+        vk::AttachmentReference depthReference { .attachment = 1, .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal};
+
+        vk::SubpassDescription description {
+            .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &colourReference,
+            .pDepthStencilAttachment = &depthReference };
+
+
+        vk::SubpassDependency depthDependency {
+            .srcSubpass = vk::SubpassExternal,
+            .dstSubpass = 0,
+            .srcStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+            .dstStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests,
+            .srcAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite,
+            .dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentRead
+        };
+
+        vk::SubpassDependency colourDependency {
+            .srcSubpass = vk::SubpassExternal,
+            .dstSubpass = 0,
+            .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
+            .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
+            .srcAccessMask = vk::AccessFlagBits::eNone,
+            .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eColorAttachmentRead };
+
+        std::array<vk::SubpassDependency, 2> layoutTransitions_dependencies { depthDependency, colourDependency };
+
+        vk::RenderPassCreateInfo renderPassCreateInfo {
+            .sType = vk::StructureType::eRenderPassCreateInfo, // What type we're creating (always gonna be this for a vk::RenderPassCreateInfo object)
+
+            // The attachments specify the format of the images we intend on working on (but does NOT say the literal exact framebuffer we'll be executing upon -- just the details/description of it)
+            .attachmentCount = static_cast<uint32_t>(attachments.size()),
+            .pAttachments = attachments.data(),
+
+            // Specifies the attachments and where they are located -- attachment 0 is colour, attachment 1 is depth.
+            // DURING FRAME BUFFER CREATION, YOU HAVE TO MATCH THESE EXACT INDICES: FIRST SLOT IS COLOUR, SECOND IS DEPTH.
+            .subpassCount = 1,
+            .pSubpasses = &description,
+
+            // The image transitions we'll be doing
+            .dependencyCount = static_cast<uint32_t>(layoutTransitions_dependencies.size()),
+            .pDependencies = layoutTransitions_dependencies.data()
+        };
+    }
+
 
 
     // Creating custom descriptors and pipelines for creating depth images.
@@ -362,7 +435,7 @@ class LightingSystem
             .pColorBlendState    = &colorBlendCreateInfo,
             .pDynamicState       = &dynamicStatesCreateInfo,
             .layout              = pipelineLayout,
-            .renderPass          = nullptr };
+            .renderPass          = nullptr }; // CREATE AND SET THE ONSCREEN RENDER PASS! IT CANT BE NULLPTR.
 
 
         // On screen:

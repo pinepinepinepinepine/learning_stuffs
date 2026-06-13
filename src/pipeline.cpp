@@ -164,7 +164,7 @@ void Pipeline::createGraphicsPipeline( const LogicalDevice& device, const vk::ra
     .layout              = pipelineLayout,
     .renderPass          = nullptr };
 
-    vk::Format depthFormat = device.findSupportedFormat(
+    depthFormat = device.findSupportedFormat(
         { vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint },
         vk::ImageTiling::eOptimal, vk::FormatFeatureFlagBits::eDepthStencilAttachment );
     vk::PipelineRenderingCreateInfo renderingCreateInfo = createRendering( framebufferProperties.surfaceFormat.format, depthFormat );

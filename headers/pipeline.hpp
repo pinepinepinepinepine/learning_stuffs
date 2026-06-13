@@ -18,6 +18,8 @@ class Pipeline
     vk::raii::PipelineLayout pipelineLayout = nullptr;
     vk::raii::Pipeline pipeline = nullptr;
 
+    vk::Format depthFormat;
+
     std::vector<vk::PipelineShaderStageCreateInfo> createProgrammableModules( const vk::raii::ShaderModule& shaderModule );
     vk::PipelineViewportStateCreateInfo createViewport( vk::Extent2D dimensions );
     static vk::PipelineRasterizationStateCreateInfo createRasterizer();
