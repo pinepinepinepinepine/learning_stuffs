@@ -57,6 +57,12 @@ struct OnscreenPass
     std::vector<GPUBuffer> onscreen_Buffers;
     Pipeline shadowPassPipeline;
     vk::raii::RenderPass renderPass = nullptr;
+
+    std::vector<vk::raii::Framebuffer> frameBuffer;
+
+    // Image colourResolveAttachment is NOT needed because we are rendering onto the swap chain's image, which IS e1.
+    Image colourAttachment; // 8x samples
+    Image depthAttachment; // 8x samples
 };
 
 
@@ -226,38 +232,52 @@ class LightingSystem
     // It's essentially saying "Hey, this job will do this"
     void createOnscreenRenderPass( const vk::Format& colorFormat, const vk::Format& depthFormat )
     {
+        // Sample count is hardcoded, but it should be from device.msaaSamples, so...
         vk::AttachmentDescription colourAttachment {
             .format = colorFormat,
-            .samples = vk::SampleCountFlagBits::e1,
+            .samples = vk::SampleCountFlagBits::e8,
             .loadOp = vk::AttachmentLoadOp::eClear,
             .storeOp = vk::AttachmentStoreOp::eStore,
             .stencilLoadOp = vk::AttachmentLoadOp::eDontCare,
 			.stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
 			.initialLayout = vk::ImageLayout::eUndefined,
-			.finalLayout = vk::ImageLayout::ePresentSrcKHR
+			.finalLayout = vk::ImageLayout::eColorAttachmentOptimal // We need to resolve this, so we're not presenting it yet.
         };
+
+        vk::AttachmentDescription colourResolveAttachment {
+            .format = colorFormat,
+            .samples = vk::SampleCountFlagBits::e1,
+            .loadOp = vk::AttachmentLoadOp::eDontCare, // We don't do eLoad because we don't want the previous contents -- we're effectively copying the data manually from the previous pass, which I suppose also ties into initialLayout
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .initialLayout = vk::ImageLayout::eUndefined, // It is undefined, which is weird, but its some performance trick? It WAS in colorOptimal, but I suppose we don't care.
+            .finalLayout = vk::ImageLayout::ePresentSrcKHR };
+
 
         vk::AttachmentDescription depthAttachment {
             .format = depthFormat,
-            .samples = vk::SampleCountFlagBits::e1,
+            .samples = vk::SampleCountFlagBits::e8,
             .loadOp = vk::AttachmentLoadOp::eClear,
-            .storeOp = vk::AttachmentStoreOp::eStore,
+            .storeOp = vk::AttachmentStoreOp::eStore, // MAYBE discard it instead of storing it: eDontCare
             .stencilLoadOp = vk::AttachmentLoadOp::eClear,
 			.stencilStoreOp = vk::AttachmentStoreOp::eDontCare,
 			.initialLayout = vk::ImageLayout::eUndefined,
 			.finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal
-        };
+        }; // We don't resolve the depth to e1 because it gets discarded anyway. No need.
+
+        // So instead of using .resolveImage/.resolveMode/.resolveImageView members within dynamic rendering's attachment stuff, you need to create a separate attachment whom's sole purpose is to resolve it to e1.
 
         // What this render pass' attachments will be
-        std::array<vk::AttachmentDescription, 2> attachments { colourAttachment, depthAttachment };
+        std::array<vk::AttachmentDescription, 3> attachments { colourAttachment, colourResolveAttachment, depthAttachment };
 
         vk::AttachmentReference colourReference { .attachment = 0, .layout = vk::ImageLayout::eColorAttachmentOptimal };
-        vk::AttachmentReference depthReference { .attachment = 1, .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal};
+        vk::AttachmentReference colourResolveReference { .attachment = 1, .layout = vk::ImageLayout::eColorAttachmentOptimal }; // .layout isnt the final layout, its what the layout needs to be while its executing.
+        vk::AttachmentReference depthReference { .attachment = 2, .layout = vk::ImageLayout::eDepthStencilAttachmentOptimal};
 
         vk::SubpassDescription description {
             .pipelineBindPoint = vk::PipelineBindPoint::eGraphics,
             .colorAttachmentCount = 1,
             .pColorAttachments = &colourReference,
+            .pResolveAttachments = &colourResolveReference,
             .pDepthStencilAttachment = &depthReference };
 
 
@@ -276,9 +296,17 @@ class LightingSystem
             .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
             .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
             .srcAccessMask = vk::AccessFlagBits::eNone,
+            .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite }; // We don't care for eColorAttachmentRead, we just want to finish writing to it -- the resolve does NOT require reading.
+
+        vk::SubpassDependency colourResolveDependency {
+            .srcSubpass = 0,
+            .dstSubpass = vk::SubpassExternal,
+            .srcStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput,
+            .dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eFragmentShader,
+            .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite, // Previously, it was  | vk::AccessFlagBits::eColorAttachmentRead, but we eDontCare'd the loadOp, so we're not reading from the previous.
             .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eColorAttachmentRead };
 
-        std::array<vk::SubpassDependency, 2> layoutTransitions_dependencies { depthDependency, colourDependency };
+        std::array<vk::SubpassDependency, 3> layoutTransitions_dependencies { depthDependency, colourDependency, colourResolveDependency };
 
         vk::RenderPassCreateInfo renderPassCreateInfo {
             .sType = vk::StructureType::eRenderPassCreateInfo, // What type we're creating (always gonna be this for a vk::RenderPassCreateInfo object)
@@ -296,6 +324,34 @@ class LightingSystem
             .dependencyCount = static_cast<uint32_t>(layoutTransitions_dependencies.size()),
             .pDependencies = layoutTransitions_dependencies.data()
         };
+
+        shadowRenderPass.renderPass = vk::raii::RenderPass( device->logicalDevice, renderPassCreateInfo );
+    }
+
+    void createOnscreenFrameBuffer( const SwapChain& swapChain, const vk::ImageView& screenMainDepthImage )
+    {
+        shadowRenderPass.frameBuffer.clear();
+
+        for ( uint32_t i = 0; i < swapChain.swapChainImages.size(); i++ )
+        {
+            // TODO: THIS. FIX THIS GARBAGE.
+            // ATTACHMENT 0 SHOULD BE SHADOWRENDERPASS' COLOURATTACHMENT, ATTACH1 IS THE SWAP CHAIN IMAGE (WHERE WE RESOLVE IT ONTO)
+            // AND ATTACH2 IS THE SHADOWRENDERPASS' DEPTHATTACHMENT
+            const std::array<vk::ImageView, 2> attachments {
+                swapChain.swapChainImages[i].imageView, // attach0
+                screenMainDepthImage }; // attach1 -- separate from offscreen's depth map.
+
+            vk::FramebufferCreateInfo framebufferCreateInfo {
+                .sType = vk::StructureType::eFramebufferCreateInfo,
+                .renderPass = shadowRenderPass.renderPass,
+                .attachmentCount = 2,
+                .pAttachments = attachments.data(),
+                .width = swapChain.imageResolution.width,
+                .height = swapChain.imageResolution.height,
+                .layers = 1 };
+
+            shadowRenderPass.frameBuffer.emplace_back( vk::raii::Framebuffer( device->logicalDevice, framebufferCreateInfo ) );
+        }
     }
 
 
@@ -413,7 +469,7 @@ class LightingSystem
             .scissorCount = 1,
             .pScissors = nullptr };
 
-        vk::PipelineMultisampleStateCreateInfo multisamplingCreateInfo = Pipeline::createMultisampling( vk::SampleCountFlagBits::e1 );
+        vk::PipelineMultisampleStateCreateInfo multisamplingCreateInfo = Pipeline::createMultisampling( vk::SampleCountFlagBits::e8 );
         multisamplingCreateInfo.minSampleShading = 1.0f;
         multisamplingCreateInfo.sampleShadingEnable = vk::False;
 
@@ -435,7 +491,7 @@ class LightingSystem
             .pColorBlendState    = &colorBlendCreateInfo,
             .pDynamicState       = &dynamicStatesCreateInfo,
             .layout              = pipelineLayout,
-            .renderPass          = nullptr }; // CREATE AND SET THE ONSCREEN RENDER PASS! IT CANT BE NULLPTR.
+            .renderPass          = shadowRenderPass.renderPass };
 
 
         // On screen:
