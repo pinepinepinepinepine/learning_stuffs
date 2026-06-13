@@ -44,8 +44,11 @@ void RenderApplication::setup()
     lightSystem.setDevice( &device );
     lightSystem.createOffscreenRenderPass();
     lightSystem.createOffscreenFrameBuffer();
+
     lightSystem.createOnscreenRenderPass( swapChain.surfaceFormat.format, graphicPipeline.depthFormat ); // getting it from the depth format is ugly asf. fix later.
+    lightSystem.createOnscreenFrameBufferImages( swapChain.imageResolution, swapChain.surfaceFormat.format, graphicPipeline.depthFormat );
     lightSystem.createOnscreenFrameBuffer( swapChain );
+
     lightSystem.createBuffers( MAX_FRAMES_IN_FLIGHT );
     lightSystem.createDescriptors( descriptorPool, MAX_FRAMES_IN_FLIGHT );
 }

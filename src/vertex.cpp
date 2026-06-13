@@ -32,12 +32,11 @@ vk::VertexInputBindingDescription ShadowVertex::getBindingDescription()
     return { .binding = 0, .stride = sizeof(ShadowVertex), .inputRate = vk::VertexInputRate::eVertex };
 }
 
-std::array<vk::VertexInputAttributeDescription, 4> ShadowVertex::getAttributeDescriptions()
+std::array<vk::VertexInputAttributeDescription, 3> ShadowVertex::getAttributeDescriptions()
 {
     vk::VertexInputAttributeDescription position_description        { .location = 0, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof( ShadowVertex, base.pos ) };
     vk::VertexInputAttributeDescription color_description           { .location = 1, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof( ShadowVertex, color ) };
-    vk::VertexInputAttributeDescription texture_coords_description  { .location = 2, .binding = 0, .format = vk::Format::eR32G32Sfloat, .offset = offsetof( ShadowVertex, textureCoords ) };
-    vk::VertexInputAttributeDescription normal_description          { .location = 3, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof( ShadowVertex, normal ) };
+    vk::VertexInputAttributeDescription normal_description          { .location = 2, .binding = 0, .format = vk::Format::eR32G32B32Sfloat, .offset = offsetof( ShadowVertex, normal ) };
 
-    return std::array<vk::VertexInputAttributeDescription, 4>{ position_description, color_description, texture_coords_description, normal_description };
+    return std::array<vk::VertexInputAttributeDescription, 3>{ position_description, color_description, normal_description };
 }

@@ -86,6 +86,9 @@ class LightingSystem
     {
         // Tutorial uses a cool destructor instead of a cleanup function -- might be handy to remove the cleanup function within runtime/renderer to a destructor!
         depthRenderPass.depthShadowMapAttachment.cleanupImage( device->logicalDevice );
+
+        shadowRenderPass.colourAttachment.cleanupImage( device->logicalDevice );
+        shadowRenderPass.depthAttachment.cleanupImage( device->logicalDevice );
     }
 
     void createOffscreenRenderPass()
@@ -225,6 +228,19 @@ class LightingSystem
     }
     // Dynamic Rendering ELIMINATES having to create framebuffers and render passes manually -- WHENEVER WE SWITCH TO DYNAMIC, AXE EM!
 
+    void createOnscreenFrameBufferImages( vk::Extent2D swapChainSize, const vk::Format& colorFormat, const vk::Format& depthFormat )
+    {
+        shadowRenderPass.colourAttachment.createImage(
+             *device, swapChainSize.width, swapChainSize.height, 1, vk::SampleCountFlagBits::e8, colorFormat, vk::ImageTiling::eOptimal,
+            vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eTransientAttachment,
+        vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageAspectFlagBits::eColor );
+
+        shadowRenderPass.depthAttachment.createImage(
+             *device, swapChainSize.width, swapChainSize.height, 1, vk::SampleCountFlagBits::e8, depthFormat, vk::ImageTiling::eOptimal,
+            vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eTransientAttachment,
+        vk::MemoryPropertyFlagBits::eDeviceLocal, vk::ImageAspectFlagBits::eDepth );
+    }
+
         // https://github.com/SaschaWillems/Vulkan/blob/master/base/vulkanexamplebase.cpp -- Onscreen Renderpass: setupRenderPass()
 
     // A renderpass is basically an introduction to what the GPU can expect when some resource runs thru the shader/pipeline
@@ -328,7 +344,7 @@ class LightingSystem
         shadowRenderPass.renderPass = vk::raii::RenderPass( device->logicalDevice, renderPassCreateInfo );
     }
 
-    void createOnscreenFrameBuffer( const SwapChain& swapChain, const vk::ImageView& screenMainDepthImage )
+    void createOnscreenFrameBuffer( const SwapChain& swapChain )
     {
         shadowRenderPass.frameBuffer.clear();
 
@@ -337,14 +353,15 @@ class LightingSystem
             // TODO: THIS. FIX THIS GARBAGE.
             // ATTACHMENT 0 SHOULD BE SHADOWRENDERPASS' COLOURATTACHMENT, ATTACH1 IS THE SWAP CHAIN IMAGE (WHERE WE RESOLVE IT ONTO)
             // AND ATTACH2 IS THE SHADOWRENDERPASS' DEPTHATTACHMENT
-            const std::array<vk::ImageView, 2> attachments {
-                swapChain.swapChainImages[i].imageView, // attach0
-                screenMainDepthImage }; // attach1 -- separate from offscreen's depth map.
+            const std::array<vk::ImageView, 3> attachments {
+                shadowRenderPass.colourAttachment.imageView, // attach0
+                swapChain.swapChainImages[i].imageView, // attach1
+                shadowRenderPass.depthAttachment.imageView }; // attach2 -- separate from offscreen's depth map.
 
             vk::FramebufferCreateInfo framebufferCreateInfo {
                 .sType = vk::StructureType::eFramebufferCreateInfo,
                 .renderPass = shadowRenderPass.renderPass,
-                .attachmentCount = 2,
+                .attachmentCount = 3,
                 .pAttachments = attachments.data(),
                 .width = swapChain.imageResolution.width,
                 .height = swapChain.imageResolution.height,
@@ -556,6 +573,8 @@ class LightingSystem
         rasterizationCreateInfo.cullMode = vk::CullModeFlagBits::eNone;
         rasterizationCreateInfo.depthBiasEnable = vk::True; // Enable depth bias
         depthStencilCreateInfo.depthCompareOp = vk::CompareOp::eLessOrEqual; // This line is useless because it's already less or equal.
+
+        multisamplingCreateInfo.rasterizationSamples = vk::SampleCountFlagBits::e1;
 
         // Add depth bias to dynamic state, so we can change it at runtime
         dynamicStates.push_back( vk::DynamicState::eDepthBias );
