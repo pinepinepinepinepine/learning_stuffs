@@ -5,6 +5,7 @@
 #include "../../headers/image.hpp"
 #include "../../headers/descriptors.hpp"
 #include "../../headers/pipeline.hpp"
+#include "../../headers/commandBuffers.hpp"
 
 
     // https://github.com/SaschaWillems/Vulkan/blob/master/examples/shadowmapping/shadowmapping.cpp
@@ -65,7 +66,6 @@ struct OnscreenPass
     Image depthAttachment; // 8x samples
 };
 
-
 class LightingSystem
 {
     Entity lightCamera {"lightCamera"};
@@ -77,6 +77,13 @@ class LightingSystem
     vk::raii::PipelineLayout pipelineLayout { VK_NULL_HANDLE };
 
     LogicalDevice* device;
+
+    // Depth bias (and slope) are used to avoid shadowing artifacts
+    static constexpr float depthBiasConstant = 1.25f; // Constant depth bias factor (always applied)
+    static constexpr float depthBiasSlope = 1.75f; // Slope depth bias factor, applied depending on polygon's slope
+
+    // We're not reusing the dynamically used command buffers because we're pre-recording commands for traditional render passes.
+    DedicatedCommandBuffers cmdBuffer; // Maybe don't static the pools? I dunno. This is pointless because we are removing this after.
 
     public:
 
@@ -593,6 +600,67 @@ class LightingSystem
         // glm::vec3(-35.0f, 30.0f, 10.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f);
         lightCamera.addComponent<TransformComponent>();
         lightCamera.addComponent<CameraComponent>();
+    }
+
+    void createCommandBuffer( const vk::raii::Device& device, uint32_t cmdBufferCount )
+    {
+        cmdBuffer.createCommandBuffers( device, cmdBufferCount );
+    }
+
+    // An annoying thing about traditional render passes is that you need to pre-record the command buffer commands instead of recording them on the fly, so it's kinda immutable (kinda... you can always modify it before literally submitting here)
+    void prerecordCommandBuffer( uint32_t executingCmdBufferIndex, std::vector<Entity*>& drawableEntities ) // we ARE recording the command buffer here as well because it is a traditional render pass, so we do not reuse the old
+    {
+        vk::raii::CommandBuffer& executingBuffer = cmdBuffer.commandBuffers[executingCmdBufferIndex];
+
+        vk::ClearValue depthClear;
+        vk::ClearValue colourClear;
+
+        vk::CommandBufferBeginInfo beginInfo { .sType = vk::StructureType::eCommandBufferBeginInfo };
+        executingBuffer.begin( beginInfo );
+
+            // First Render Pass: creates the shadow map by rendering from the light's point of view (offscreen)
+        depthClear.depthStencil = { 1.0f, 0 };
+
+        vk::RenderPassBeginInfo renderBeginInfo {
+            .sType = vk::StructureType::eRenderPassBeginInfo,
+            .renderPass = depthRenderPass.renderPass,
+            .framebuffer = depthRenderPass.frameBuffer,
+            .renderArea = { .extent = { depthRenderPass.width, depthRenderPass.height } },
+            .clearValueCount = 1,
+            .pClearValues = &depthClear };
+
+        executingBuffer.beginRenderPass( renderBeginInfo, vk::SubpassContents::eInline ); // Subpass Contents means itll only be recorded onto this command buffer (doesnt use secondary cmd buffers)
+
+        // Dynamic States
+        vk::Viewport viewport {
+            .width = depthRenderPass.width,
+            .height = depthRenderPass.height,
+            .minDepth = 0.0,
+            .maxDepth = 1.0f };
+        vk::Rect2D scissor {
+            .offset = { 0,0 },
+            .extent = { depthRenderPass.width, depthRenderPass.height } };
+        executingBuffer.setViewport(0, viewport);
+        executingBuffer.setScissor(0, scissor);
+
+        executingBuffer.setDepthBias( depthBiasConstant, 0.0f, depthBiasSlope );
+
+        executingBuffer.bindPipeline( vk::PipelineBindPoint::eGraphics, depthRenderPass.depthMapPipeline.pipeline );
+        executingBuffer.bindDescriptorSets(
+            vk::PipelineBindPoint::eGraphics, depthRenderPass.depthMapPipeline.pipelineLayout, 0, *depthRenderPass.descriptor.descriptorSets[executingCmdBufferIndex], nullptr );
+
+        for ( Entity* entity : drawableEntities )
+        {
+            ModelData* model = entity->GetComponent<ModelComponent>()->getModel();
+
+            executingBuffer.bindVertexBuffers(0, *model->vertexBuffer.gpuBuffer, {0} );
+            executingBuffer.bindIndexBuffer( *model->indexBuffer.gpuBuffer, 0, vk::IndexType::eUint32 );
+            executingBuffer.drawIndexed( model->indices_count, 1, 0, 0, 0 );
+        }
+
+		//Note: Explicit synchronization is not required between the render pass, as this is done implicitly via sub pass dependencies
+
+            // Second Render Pass: actually draw the scene
     }
 
 
