@@ -456,8 +456,8 @@ class LightingSystem
 
             // Onscreen
             shadowRenderPass.descriptor.setBufferResource( device->logicalDevice, shadowRenderPass.onscreen_Buffers[i].gpuBuffer, vk::DescriptorType::eUniformBuffer, sizeof(OnscreenBuffer), i, 0 );
-            shadowRenderPass.descriptor.setSamplerResource( device->logicalDevice, depthRenderPass.depthSampler, depthRenderPass.depthShadowMapAttachment.imageView, i, 1 );
-            shadowRenderPass.descriptor.setSampledImageResource( device->logicalDevice, depthRenderPass.depthShadowMapAttachment.imageView, i, 2 );
+            shadowRenderPass.descriptor.setSamplerResource( device->logicalDevice, depthRenderPass.depthSampler, depthRenderPass.depthShadowMapAttachment.imageView, i, 1, vk::ImageLayout::eDepthStencilReadOnlyOptimal );
+            shadowRenderPass.descriptor.setSampledImageResource( device->logicalDevice, depthRenderPass.depthShadowMapAttachment.imageView, i, 2, vk::ImageLayout::eDepthStencilReadOnlyOptimal );
         }
 
         createPipelines( { depthRenderPass.descriptor.descriptorSetLayout } );
@@ -663,6 +663,7 @@ class LightingSystem
 
         executingBuffer.endRenderPass();
 
+        // depthSampledImage on onscreen fragment is causing errors: image is VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, but its expecting VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
 		//Note: Explicit synchronization is not required between the render pass, as this is done implicitly via sub pass dependencies
 
             // Second Render Pass: actually draw the scene

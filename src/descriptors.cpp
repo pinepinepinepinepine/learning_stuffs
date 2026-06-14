@@ -67,12 +67,12 @@ void Descriptor::setBufferResource(
 }
 
 void Descriptor::setSamplerResource(
-    const vk::raii::Device& device, const vk::Sampler& textureSampler, const vk::ImageView& textureImageView, size_t descriptorSetIndex, uint32_t binding )
+    const vk::raii::Device& device, const vk::Sampler& textureSampler, const vk::ImageView& textureImageView, size_t descriptorSetIndex, uint32_t binding, const vk::ImageLayout imageLayout )
 {
     vk::DescriptorImageInfo samplerInfo {
         .sampler = textureSampler,
         .imageView = textureImageView,
-        .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+        .imageLayout = imageLayout };
 
     vk::WriteDescriptorSet samplerDescriptorWrite {
         .dstSet = descriptorSets[descriptorSetIndex],
@@ -85,12 +85,12 @@ void Descriptor::setSamplerResource(
     device.updateDescriptorSets( samplerDescriptorWrite, {} );
 }
 
-void Descriptor::setSampledImageResource( const vk::raii::Device& device, const vk::ImageView& textureImageView, size_t descriptorSetIndex, uint32_t binding )
+void Descriptor::setSampledImageResource( const vk::raii::Device& device, const vk::ImageView& textureImageView, size_t descriptorSetIndex, uint32_t binding, const vk::ImageLayout imageLayout )
 {
     vk::DescriptorImageInfo sampledImageInfo {
         .sampler = nullptr, // we are solely providing the image itself, not a sampler.
         .imageView = textureImageView,
-        .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+        .imageLayout = imageLayout };
 
     vk::WriteDescriptorSet sampledImageDescriptorWrite {
         .dstSet = descriptorSets[descriptorSetIndex],
