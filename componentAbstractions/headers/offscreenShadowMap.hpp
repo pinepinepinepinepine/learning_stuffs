@@ -505,6 +505,9 @@ class LightingSystem
             .pSetLayouts = descriptorLayouts.data() };
 
         pipelineLayout = vk::raii::PipelineLayout( device->logicalDevice, pipelineLayoutCreateInfo );
+        // scuffed but whatever
+        depthRenderPass.depthMapPipeline.pipelineLayout = vk::raii::PipelineLayout( device->logicalDevice, pipelineLayoutCreateInfo );
+        shadowRenderPass.shadowPassPipeline.pipelineLayout = vk::raii::PipelineLayout( device->logicalDevice, pipelineLayoutCreateInfo );
 
         // We modify this later on a per pipeline basis: they're pointers, so it works.
         vk::GraphicsPipelineCreateInfo graphicsCreateInfo {
@@ -665,7 +668,9 @@ class LightingSystem
             // Second Render Pass: actually draw the scene
 
         vk::ClearValue colourClear = vk::ClearColorValue( (199/255.0f), (160/255.0f), (148/255.0f), 1.0f );
-        std::array<vk::ClearValue, 2> clear { colourClear, depthClear };
+        // Dummy empty placement: this is because the onscreen renderpass has 3 attachments, and i suppose you need a clear value for each of them -- likely because the third attachment has a clear value, so I suppose it needs that order to be exact, hence empty for attach2
+        // Attach 2 is skipped.
+        std::array<vk::ClearValue, 3> clear { colourClear, vk::ClearValue{}, depthClear };
 
         vk::RenderPassBeginInfo on_renderBeginInfo {
             .sType = vk::StructureType::eRenderPassBeginInfo,
