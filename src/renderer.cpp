@@ -53,6 +53,8 @@ void RenderApplication::setup()
     lightSystem.createDescriptors( descriptorPool, MAX_FRAMES_IN_FLIGHT );
 
     lightSystem.createCommandBuffer( device.logicalDevice, MAX_FRAMES_IN_FLIGHT );
+
+    lightSystem.createLightCamera();
 }
 
 void RenderApplication::createTextures()

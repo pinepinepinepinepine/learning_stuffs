@@ -20,9 +20,9 @@
 // Fix this. Redefinition. This is for offscreen's GPU buffers.
 // Maybe it's a better idea to calculate the * MVP to save the GPU from doing it? IT IS. REFACTOR AFTER COMPLETION.
 struct mvpBuffer {
-    glm::mat4 model;
-    glm::mat4 view;
     glm::mat4 proj;
+    glm::mat4 view;
+    glm::mat4 model;
 };
 
 // This is for onscreen. Copy the entity's data from Transform and Camera component -- it houses this data.
@@ -600,14 +600,6 @@ class LightingSystem
         depthRenderPass.depthMapPipeline.pipeline = vk::raii::Pipeline( device->logicalDevice, nullptr, graphicsCreateInfo );
     }
 
-    // fuck this. probs a better way.
-    void createLightCamera()
-    {
-        // glm::vec3(-35.0f, 30.0f, 10.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f);
-        lightCamera.addComponent<TransformComponent>();
-        lightCamera.addComponent<CameraComponent>();
-    }
-
     void createCommandBuffer( const vk::raii::Device& device, uint32_t cmdBufferCount )
     {
         cmdBuffer.createCommandBuffers( device, cmdBufferCount );
@@ -715,5 +707,46 @@ class LightingSystem
         executingBuffer.endRenderPass();
 
         executingBuffer.end();
+    }
+
+    // fuck this. probs a better way.
+    void createLightCamera()
+    {
+        lightCamera.addComponent<TransformComponent>( glm::vec3(-35.0f, 30.0f, 15.0f), glm::quat(1.0f, 0.0f, 0.0f, 0.0f), glm::vec3(1.0f) );
+        lightCamera.addComponent<CameraComponent>();
+    }
+
+    void updateLightCamera( const float time )
+    {
+        glm::vec3 position;
+
+        position.x = cos( glm::radians(time * 360.0f) ) * 40.0f;
+        position.y = -50.0f + sin( glm::radians(time * 360.0f) ) * 20.0f;
+        position.z = 25.0f + sin( glm::radians(time * 360.0f) ) * 5.0f;
+
+        lightCamera.GetComponent<TransformComponent>()->SetPosition( position );
+    }
+
+    void updateUniformBuffers( const uint32_t bufferIndex, const CameraComponent* userCamera )
+    {
+        // Make sure to set these to actually hold value.
+        TransformComponent* transform = lightCamera.GetComponent<TransformComponent>();
+        CameraComponent* camera = lightCamera.GetComponent<CameraComponent>();
+
+        mvpBuffer offscreen {
+            .proj = glm::perspective(glm::radians(camera->fieldOfView), 1.0f, camera->nearPlane, camera->farPlane),
+            .view = glm::lookAt(transform->GetPosition(), glm::vec3(0.0f), glm::vec3(0, 1, 0)),
+            .model = glm::mat4(1.0f) };
+        memcpy( depthRenderPass.offscreen_Buffers[bufferIndex].gpuBufferMapped, &offscreen, sizeof(mvpBuffer) ); // Multiply it and then send the multiplied transformation matrix.
+
+        OnscreenBuffer buffer;
+        buffer.projection = userCamera->getProjectionMatrix();
+        buffer.view = userCamera->getViewMatrix();
+        buffer.model = glm::mat4(1.0f);
+        buffer.depthBiasMVP = offscreen.proj * offscreen.view * offscreen.model;
+        buffer.lightPos = glm::vec4( transform->GetPosition(), 1.0f );
+        buffer.zNear = camera->nearPlane;
+        buffer.zFar = camera->farPlane;
+        memcpy( shadowRenderPass.onscreen_Buffers[bufferIndex].gpuBufferMapped, &buffer, sizeof(OnscreenBuffer) );
     }
 };

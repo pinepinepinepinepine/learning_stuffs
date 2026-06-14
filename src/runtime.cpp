@@ -25,6 +25,8 @@ void RunTimeApplication::updateMVPUBOBuffer()
 	auto  currentTime = std::chrono::high_resolution_clock::now();
 	float time        = std::chrono::duration<float>(currentTime - startTime).count();
 
+    app->lightSystem.updateLightCamera( time ); // Fix this. Solely keeping it here because it's convenient to local time.
+
     mvpUBOBuffer mvpTransformationMatrix{};
 
     // Camera Rotation
@@ -435,6 +437,9 @@ void RunTimeApplication::drawFrame()
     updateMVPUBOBuffer();
     updateParticleBuffer();
     updateWireMVPUBOBuffer();
+
+    // Add the light update here, it's currently in updateMVPUBOBuffer because time is calculated there and it's convenient.
+    app->lightSystem.updateUniformBuffers( executingCommandBufferIndex, app->camera.GetComponent<CameraComponent>() );
 
     glm::vec3 guh = app->camera.GetComponent<TransformComponent>()->GetPosition();
 
