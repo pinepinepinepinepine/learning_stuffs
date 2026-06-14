@@ -448,6 +448,9 @@ void RunTimeApplication::drawFrame()
     const std::vector<Entity*>& visibleEntities = app->cullSystem.getVisibleEntities();
 
     prepareImageLayout( imageIndex ); // TODO: call begin rendering and end rendering once. Draw all images in one pass.
+
+    app->lightSystem.recordCommandBuffer( executingCommandBufferIndex, imageIndex, visibleEntities );
+
     for ( const Entity* entity : visibleEntities )
     {
         recordEntityCommandBuffers( imageIndex, entity, true ); // TODO: Add a debug switch instead of TRUE to allow bounding boxes to be rendered while the object itself is out of the frustum.

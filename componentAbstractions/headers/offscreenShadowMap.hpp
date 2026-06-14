@@ -64,6 +64,8 @@ struct OnscreenPass
     // Image colourResolveAttachment is NOT needed because we are rendering onto the swap chain's image, which IS e1.
     Image colourAttachment; // 8x samples
     Image depthAttachment; // 8x samples
+
+    uint32_t width, height;
 };
 
 class LightingSystem
@@ -355,6 +357,9 @@ class LightingSystem
     {
         shadowRenderPass.frameBuffer.clear();
 
+        shadowRenderPass.width = swapChain.imageResolution.width;
+        shadowRenderPass.height = swapChain.imageResolution.height;
+
         for ( uint32_t i = 0; i < swapChain.swapChainImages.size(); i++ )
         {
             // TODO: THIS. FIX THIS GARBAGE.
@@ -377,8 +382,6 @@ class LightingSystem
             shadowRenderPass.frameBuffer.emplace_back( vk::raii::Framebuffer( device->logicalDevice, framebufferCreateInfo ) );
         }
     }
-
-
 
     // Creating custom descriptors and pipelines for creating depth images.
     void createBuffers( const int& buffersToCreate )
@@ -607,25 +610,22 @@ class LightingSystem
         cmdBuffer.createCommandBuffers( device, cmdBufferCount );
     }
 
-    // An annoying thing about traditional render passes is that you need to pre-record the command buffer commands instead of recording them on the fly, so it's kinda immutable (kinda... you can always modify it before literally submitting here)
-    void prerecordCommandBuffer( uint32_t executingCmdBufferIndex, std::vector<Entity*>& drawableEntities ) // we ARE recording the command buffer here as well because it is a traditional render pass, so we do not reuse the old
+    void recordCommandBuffer( uint32_t executingCmdBufferIndex, uint32_t currentImageIndex, const std::vector<Entity*>& drawableEntities ) // we ARE recording the command buffer here as well because it is a traditional render pass, so we do not reuse the old cmd buffer within our dynamic render
     {
         vk::raii::CommandBuffer& executingBuffer = cmdBuffer.commandBuffers[executingCmdBufferIndex];
 
         vk::ClearValue depthClear;
-        vk::ClearValue colourClear;
-
         vk::CommandBufferBeginInfo beginInfo { .sType = vk::StructureType::eCommandBufferBeginInfo };
         executingBuffer.begin( beginInfo );
 
             // First Render Pass: creates the shadow map by rendering from the light's point of view (offscreen)
-        depthClear.depthStencil = { 1.0f, 0 };
+        depthClear.depthStencil = vk::ClearDepthStencilValue{ 1.0f, 0 };
 
         vk::RenderPassBeginInfo renderBeginInfo {
             .sType = vk::StructureType::eRenderPassBeginInfo,
             .renderPass = depthRenderPass.renderPass,
             .framebuffer = depthRenderPass.frameBuffer,
-            .renderArea = { .extent = { depthRenderPass.width, depthRenderPass.height } },
+            .renderArea = { .offset = { 0,0 }, .extent = { depthRenderPass.width, depthRenderPass.height } },
             .clearValueCount = 1,
             .pClearValues = &depthClear };
 
@@ -633,8 +633,8 @@ class LightingSystem
 
         // Dynamic States
         vk::Viewport viewport {
-            .width = depthRenderPass.width,
-            .height = depthRenderPass.height,
+            .width = static_cast<float>(depthRenderPass.width),
+            .height = static_cast<float>(depthRenderPass.height),
             .minDepth = 0.0,
             .maxDepth = 1.0f };
         vk::Rect2D scissor {
@@ -658,10 +658,56 @@ class LightingSystem
             executingBuffer.drawIndexed( model->indices_count, 1, 0, 0, 0 );
         }
 
+        executingBuffer.endRenderPass();
+
 		//Note: Explicit synchronization is not required between the render pass, as this is done implicitly via sub pass dependencies
 
             // Second Render Pass: actually draw the scene
+
+        vk::ClearValue colourClear = vk::ClearColorValue( (199/255.0f), (160/255.0f), (148/255.0f), 1.0f );
+        std::array<vk::ClearValue, 2> clear { colourClear, depthClear };
+
+        vk::RenderPassBeginInfo on_renderBeginInfo {
+            .sType = vk::StructureType::eRenderPassBeginInfo,
+            .renderPass = shadowRenderPass.renderPass,
+            .framebuffer = shadowRenderPass.frameBuffer[currentImageIndex],
+            .renderArea = { .offset = { 0,0 }, .extent = { shadowRenderPass.width, shadowRenderPass.height } },
+            .clearValueCount = static_cast<uint32_t>(clear.size()),
+            .pClearValues = clear.data() };
+
+        executingBuffer.beginRenderPass( on_renderBeginInfo, vk::SubpassContents::eInline );
+
+        // Dynamic States
+        vk::Viewport on_viewport {
+            .width = static_cast<float>(shadowRenderPass.width),
+            .height = static_cast<float>(shadowRenderPass.height),
+            .minDepth = 0.0,
+            .maxDepth = 1.0f };
+        vk::Rect2D on_scissor {
+            .offset = { 0,0 },
+            .extent = { shadowRenderPass.width, shadowRenderPass.height } };
+        executingBuffer.setViewport(0, on_viewport);
+        executingBuffer.setScissor(0, on_scissor);
+
+
+        // There's a handy lookin' "visualize shadow map" render option here, maybe deal with it later? It'd be cool to have it on a switch/button.
+        // There's also a if to choose whether or not to run through the PCF/nonPCF pipeline, but we dont care for now.
+        // The shadow map is granted via binding through the descriptor (sampler)
+
+        executingBuffer.bindPipeline( vk::PipelineBindPoint::eGraphics, shadowRenderPass.shadowPassPipeline.pipeline );
+        executingBuffer.bindDescriptorSets(
+            vk::PipelineBindPoint::eGraphics, shadowRenderPass.shadowPassPipeline.pipelineLayout, 0, *shadowRenderPass.descriptor.descriptorSets[executingCmdBufferIndex], nullptr );
+
+        for ( Entity* entity : drawableEntities )
+        {
+            ModelData* model = entity->GetComponent<ModelComponent>()->getModel();
+
+            executingBuffer.bindVertexBuffers(0, *model->vertexBuffer.gpuBuffer, {0} );
+            executingBuffer.bindIndexBuffer( *model->indexBuffer.gpuBuffer, 0, vk::IndexType::eUint32 );
+            executingBuffer.drawIndexed( model->indices_count, 1, 0, 0, 0 );
+        }
+        executingBuffer.endRenderPass();
+
+        executingBuffer.end();
     }
-
-
 };
