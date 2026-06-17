@@ -24,6 +24,9 @@ struct Vertex
 
     static vk::VertexInputBindingDescription getBindingDescription();
     static std::array<vk::VertexInputAttributeDescription, 1> getAttributeDescriptions();
+
+    bool operator==( const Vertex& other ) const
+    { return base == other.base; }
 };
 
 struct TextureVertex
@@ -41,17 +44,16 @@ struct TextureVertex
     { return base == other.base && color == other.color && textureCoords == other.textureCoords; }
 };
 
+// TODO: add texture, as well for multi binding.
 struct ShadowVertex
 {
-    BaseVertexAttributes base;
     glm::vec3 color;
     glm::vec3 normal; // This is how shadows are created.
-
 
     ShadowVertex() = default;
 
     static vk::VertexInputBindingDescription getBindingDescription();
-    static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions();
+    static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDescriptions();
 };
 
 // god i hate the lack of inheritance
@@ -69,6 +71,14 @@ namespace std
             size_t vertex_textureCoords_hash = vec2_hash( vertex.textureCoords ) << 1;
             size_t vertex_hash = ( ( vertex_position_hash ^ vertex_color_hash ) >> 1 ) ^ ( vertex_textureCoords_hash );
             return vertex_hash;
+        }
+    };
+
+    template<> struct hash<Vertex>
+    {
+        size_t operator()( Vertex const& vertex ) const
+        {
+            return std::hash<glm::vec3>{}( vertex.base.pos ); // Built in by GLM. Thanks.
         }
     };
 }

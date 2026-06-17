@@ -1,9 +1,9 @@
 // https://github.com/SaschaWillems/Vulkan/blob/master/shaders/glsl/shadowmapping/scene.vert
 
 struct VSInput {
-    float3 inPosition;
-    float3 inColor;
-    float3 inNormal;
+    [[vk::location(0)]] float3 inPosition;
+    [[vk::location(1)]] float3 inColor;
+    [[vk::location(2)]] float3 inNormal;
 };
 
 // Binding 0: used to create shadow data.

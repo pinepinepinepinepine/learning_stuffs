@@ -42,17 +42,15 @@ void RenderApplication::setup()
     cullSystem.setCamera( camera.GetComponent<CameraComponent>() );
 
     lightSystem.setDevice( &device );
-    lightSystem.createOffscreenRenderPass();
-    lightSystem.createOffscreenFrameBuffer();
-
-    lightSystem.createOnscreenRenderPass( swapChain.surfaceFormat.format, graphicPipeline.depthFormat ); // getting it from the depth format is ugly asf. fix later.
-    lightSystem.createOnscreenFrameBufferImages( swapChain.imageResolution, swapChain.surfaceFormat.format, graphicPipeline.depthFormat );
-    lightSystem.createOnscreenFrameBuffer( swapChain );
+    lightSystem.setFormats( swapChain.surfaceFormat.format, graphicPipeline.depthFormat );
+    lightSystem.setViewportExtent( swapChain.imageResolution );
+    lightSystem.createDepthMapAttachment();
 
     lightSystem.createBuffers( MAX_FRAMES_IN_FLIGHT );
     lightSystem.createDescriptors( descriptorPool, MAX_FRAMES_IN_FLIGHT );
+    lightSystem.createPipelines();
 
-    lightSystem.createCommandBuffer( device.logicalDevice, MAX_FRAMES_IN_FLIGHT );
+    lightSystem.createCommandBuffers( device.logicalDevice, MAX_FRAMES_IN_FLIGHT );
 
     lightSystem.createLightCamera();
 }

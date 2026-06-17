@@ -33,12 +33,15 @@ struct RunTimeApplication
     void recordCameraFrustumBoundingCommandBuffer( uint32_t currentImageIndex );
     void transitionSwapChainImageToPresentOptimal( uint32_t currentImageIndex );
     void submitComputeCommandBuffers( uint64_t waitForValue, uint64_t signalValue );
-    void submitCommandBuffers( uint32_t currentImageIndex, vk::PipelineStageFlags pipelineWaitStage, uint64_t waitForValue, uint64_t signalValue );
+    void submitCommandBuffers( vk::PipelineStageFlags pipelineWaitStage, uint64_t waitForValue, uint64_t signalValue );
     void presentToWindow( uint32_t currentImageIndex, uint64_t signalValue );
     void drawFrame();
     void mainLoop();
     void run();
 
+    void renderDepthMap( const std::vector<Entity*>& visibleEntities );
+    void renderShadowScene( uint32_t currentImageIndex, const std::vector<Entity*>& visibleEntities );
+    void changeImageLayoutForRendering( uint32_t currentImageIndex );
 
     void initThreads();
     void threadWork( uint32_t threadIndex );

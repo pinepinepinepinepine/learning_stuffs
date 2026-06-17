@@ -22,12 +22,12 @@ void DedicatedCommandBuffers::initialize( vk::raii::CommandPool& pool )
     commandPool = &pool;
 }
 
-void DedicatedCommandBuffers::createCommandBuffers( const vk::raii::Device& device, uint32_t cmdBufferCount )
+void DedicatedCommandBuffers::createCommandBuffers( const vk::raii::Device& device, uint32_t cmdBufferCount, vk::CommandBufferLevel level )
 {
     commandBuffers.clear();
     vk::CommandBufferAllocateInfo commandBuffer_allocationInfo {
         .commandPool = *commandPool,
-        .level = vk::CommandBufferLevel::ePrimary,
+        .level = level,
         .commandBufferCount = cmdBufferCount };
 
     commandBuffers = vk::raii::CommandBuffers( device, commandBuffer_allocationInfo );

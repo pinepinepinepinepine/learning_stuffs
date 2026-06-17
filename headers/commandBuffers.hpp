@@ -13,7 +13,7 @@ struct DedicatedCommandBuffers
     std::vector<vk::raii::CommandBuffer> commandBuffers;
 
     static void initialize( vk::raii::CommandPool& pool );
-    void createCommandBuffers( const vk::raii::Device& device, uint32_t cmdBufferCount );
+    void createCommandBuffers( const vk::raii::Device& device, uint32_t cmdBufferCount, vk::CommandBufferLevel level = vk::CommandBufferLevel::ePrimary );
 };
 
 struct TransientCommandBuffer

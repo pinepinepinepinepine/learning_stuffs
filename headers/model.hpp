@@ -69,10 +69,14 @@ struct AABB_box
 
 struct ModelData
 {
+    // TODO: Remove vertexBuffer and just separate it. Maybe make it a ptr?
     GPUBuffer vertexBuffer;
     GPUBuffer indexBuffer;
     uint32_t indices_count;
     uint32_t vertices_count;
+
+    GPUBuffer vertexBuffer_Positions;
+    GPUBuffer vertexBuffer_Normals;
 
     AABB_box loadModel( const LogicalDevice& device, const char *filename );
 };

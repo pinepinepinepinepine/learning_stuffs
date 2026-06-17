@@ -10,6 +10,9 @@ AABB_box ModelData::loadModel( const LogicalDevice& device, const char *filename
     std::vector<TextureVertex> vertices;
     std::vector<uint32_t> indices;
 
+    std::vector<Vertex> verticesPos;
+    std::vector<ShadowVertex> verticesShadow;
+
     float min_x = std::numeric_limits<float>::max();
     float max_x = std::numeric_limits<float>::min();
     float min_y = std::numeric_limits<float>::max();
@@ -28,6 +31,8 @@ AABB_box ModelData::loadModel( const LogicalDevice& device, const char *filename
         for (const auto& index : shape.mesh.indices )
         {
             TextureVertex vertex{};
+            ShadowVertex vertexShadow{};
+            Vertex vertexPos{};
 
             vertex.base = glm::vec3{
                 attrib.vertices[3 * index.vertex_index + 0],
@@ -41,10 +46,23 @@ AABB_box ModelData::loadModel( const LogicalDevice& device, const char *filename
 
             vertex.color = {1.0f, 1.0f, 1.0f};
 
+            // Positions
+            vertexPos = glm::vec3{ vertex.base.pos };
+            // Shadows
+            vertexShadow.color = vertex.color;
+            vertexShadow.normal = glm::vec3{
+                attrib.vertices[3 * index.normal_index + 0],
+                attrib.vertices[3 * index.normal_index + 1],
+                attrib.vertices[3 * index.normal_index + 2]
+            };
+
             if ( uniqueVertices.count( vertex ) == 0 )
             {
                 uniqueVertices[vertex] = static_cast<uint32_t>( vertices.size() );
+
                 vertices.push_back(vertex);
+                verticesPos.push_back( vertexPos );
+                verticesShadow.push_back( vertexShadow );
 
                 if ( vertex.base.pos.x < min_x ) min_x = vertex.base.pos.x;
                 if ( vertex.base.pos.x > max_x ) max_x = vertex.base.pos.x;
@@ -65,6 +83,20 @@ AABB_box ModelData::loadModel( const LogicalDevice& device, const char *filename
         false );
     vertexBuffer.muleBuffer( device, vertices );
     vertices_count = vertices.size();
+
+    vertexBuffer_Positions.createGPUBuffer( device,
+        sizeof(verticesPos[0]) * verticesPos.size(),
+        vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        vk::MemoryPropertyFlagBits::eDeviceLocal,
+        false );
+    vertexBuffer_Positions.muleBuffer( device, verticesPos );
+
+    vertexBuffer_Normals.createGPUBuffer( device,
+        sizeof(verticesShadow[0]) * verticesShadow.size(),
+        vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        vk::MemoryPropertyFlagBits::eDeviceLocal,
+        false );
+    vertexBuffer_Normals.muleBuffer( device, verticesShadow );
 
     indexBuffer.createGPUBuffer(
         device,

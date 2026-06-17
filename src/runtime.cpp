@@ -122,6 +122,104 @@ void RunTimeApplication::updateMVPUBOBuffer()
     //std::cout << "Quaternion Rotation of Camera: " << rotaQuat.w << ", " << rotaQuat.x << ", " << rotaQuat.y << ", " << rotaQuat.z << "\n\n";
 }
 
+void RunTimeApplication::renderDepthMap( const std::vector<Entity*>& visibleEntities )
+{
+    vk::ClearValue clearDepth = vk::ClearDepthStencilValue( 1.0f, 0 );
+
+    vk::RenderingAttachmentInfo depthAttachmentInfo {
+        .imageView          = app->lightSystem.depthRenderPass.depthShadowMapAttachment.imageView,
+        .imageLayout        = vk::ImageLayout::eDepthAttachmentOptimal,
+        .loadOp             = vk::AttachmentLoadOp::eClear,
+        .storeOp            = vk::AttachmentStoreOp::eStore,
+        .clearValue = clearDepth };
+
+    vk::Extent2D depthImageExtent = { app->lightSystem.depthRenderPass.width, app->lightSystem.depthRenderPass.height };
+
+    vk::RenderingInfo renderingInfo {
+        .flags = vk::RenderingFlagBits::eContentsSecondaryCommandBuffers, // Specifies we're running secondary cmd buffers to to the driver.
+        .renderArea           = { .offset = { 0, 0 }, .extent = depthImageExtent }, // also maybe convert this to like 800x600 or whatever was specified
+        .layerCount           = 1,
+        .colorAttachmentCount = 0,
+        .pColorAttachments    = nullptr, // THIS CANT BE LIKE THIS FOR THE DEPTH PASS (FIRST) BECAUSE ITS EXPECTING ONLY A DEPTH, NO COLOUR
+        .pDepthAttachment     = &depthAttachmentInfo };
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].beginRendering( renderingInfo );
+
+    app->lightSystem.RecordOffScreenCommandBuffers( executingCommandBufferIndex, visibleEntities );
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].executeCommands(*app->lightSystem.depthRenderPass.cmdBuffer.commandBuffers[executingCommandBufferIndex]);
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
+}
+
+void RunTimeApplication::renderShadowScene( uint32_t currentImageIndex, const std::vector<Entity*>& visibleEntities )
+{
+    vk::ClearValue clearDepth = vk::ClearDepthStencilValue( 1.0f, 0 );
+    vk::ClearValue clearColour = vk::ClearColorValue( (199/255.0f), (160/255.0f), (148/255.0f), 1.0f );
+    vk::RenderingAttachmentInfo colourAttachmentInfo {
+        .imageView          = app->colourImage.imageView,
+        .imageLayout        = vk::ImageLayout::eColorAttachmentOptimal,
+        .resolveMode        = vk::ResolveModeFlagBits::eAverage,
+        .resolveImageView   = app->swapChain.swapChainImages[currentImageIndex].imageView,
+        .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+        .loadOp             = vk::AttachmentLoadOp::eClear,
+        .storeOp            = vk::AttachmentStoreOp::eStore,
+        .clearValue         = clearColour };
+
+    vk::RenderingAttachmentInfo depthAttachmentInfo {
+        .imageView          = app->depthImage.imageView,
+        .imageLayout        = vk::ImageLayout::eDepthAttachmentOptimal,
+        .loadOp             = vk::AttachmentLoadOp::eClear,
+        .storeOp            = vk::AttachmentStoreOp::eStore,
+        .clearValue = clearDepth };
+
+    vk::RenderingInfo renderingInfo {
+        .flags = vk::RenderingFlagBits::eContentsSecondaryCommandBuffers, // Specifies we're running secondary cmd buffers to to the driver.
+        .renderArea           = { .offset = { 0, 0 }, .extent = app->swapChain.imageResolution }, // also maybe convert this to like 800x600 or whatever was specified
+        .layerCount           = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments    = &colourAttachmentInfo, // THIS CANT BE LIKE THIS FOR THE DEPTH PASS (FIRST) BECAUSE ITS EXPECTING ONLY A DEPTH, NO COLOUR
+        .pDepthAttachment     = &depthAttachmentInfo };
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].beginRendering( renderingInfo );
+
+    app->lightSystem.RecordOnScreenCommandBuffers( executingCommandBufferIndex, visibleEntities );
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].executeCommands(*app->lightSystem.shadowRenderPass.cmdBuffer.commandBuffers[executingCommandBufferIndex]);
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
+}
+
+void RunTimeApplication::changeImageLayoutForRendering( uint32_t currentImageIndex )
+{
+    app->swapChain.swapChainImages[currentImageIndex].changeImageLayout(
+        vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
+        {}, vk::AccessFlagBits2::eColorAttachmentWrite,
+        vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+        vk::ImageAspectFlagBits::eColor, 1, &app->cmdBuffers.commandBuffers[executingCommandBufferIndex] ); // Maybe make a #define for 1 in the context of mipImages?
+
+    // TODO: can we REUSE these? do we HAVE to change layout EVERY record?
+    app->colourImage.changeImageLayout(
+        vk::ImageLayout::eUndefined, vk::ImageLayout::eColorAttachmentOptimal,
+        vk::AccessFlagBits2::eColorAttachmentWrite, vk::AccessFlagBits2::eColorAttachmentWrite,
+        vk::PipelineStageFlagBits2::eColorAttachmentOutput, vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+        vk::ImageAspectFlagBits::eColor, 1, &app->cmdBuffers.commandBuffers[executingCommandBufferIndex] );
+    app->depthImage.changeImageLayout(
+        vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthAttachmentOptimal,
+        vk::AccessFlagBits2::eDepthStencilAttachmentWrite, vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+        vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
+        vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
+        vk::ImageAspectFlagBits::eDepth, 1, &app->cmdBuffers.commandBuffers[executingCommandBufferIndex] );
+
+    // WE HAVE TO ADD THE LIGHT SYSTEM'S SHADOW MAP! Need to reset it to be able to be read from before the next record.
+    app->lightSystem.depthRenderPass.depthShadowMapAttachment.changeImageLayout(
+        vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthAttachmentOptimal,
+        vk::AccessFlagBits2::eShaderRead, vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
+        vk::PipelineStageFlagBits2::eFragmentShader,
+        vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
+        vk::ImageAspectFlagBits::eDepth, 1, &app->cmdBuffers.commandBuffers[executingCommandBufferIndex] );
+}
+
 void RunTimeApplication::prepareImageLayout( uint32_t currentImageIndex )
 {
     app->swapChain.swapChainImages[currentImageIndex].changeImageLayout(
@@ -164,10 +262,11 @@ void RunTimeApplication::prepareImageLayout( uint32_t currentImageIndex )
         .clearValue = clearDepth };
 
     vk::RenderingInfo renderingInfo {
-        .renderArea           = { .offset = { 0, 0 }, .extent = app->swapChain.imageResolution },
+        // .flags = vk::RenderingContentsFlagBits::eSecondarCommandBuffers, // Specifies we're running secondary cmd buffers to to the driver.
+        .renderArea           = { .offset = { 0, 0 }, .extent = app->swapChain.imageResolution }, // also maybe convert this to like 800x600 or whatever was specified
         .layerCount           = 1,
         .colorAttachmentCount = 1,
-        .pColorAttachments    = &colourAttachmentInfo,
+        .pColorAttachments    = &colourAttachmentInfo, // THIS CANT BE LIKE THIS FOR THE DEPTH PASS (FIRST) BECAUSE ITS EXPECTING ONLY A DEPTH, NO COLOUR
         .pDepthAttachment     = &depthAttachmentInfo };
 
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].beginRendering( renderingInfo );
@@ -379,7 +478,7 @@ void RunTimeApplication::submitComputeCommandBuffers( uint64_t waitForValue, uin
     }
 }
 
-void RunTimeApplication::submitCommandBuffers( uint32_t currentImageIndex, vk::PipelineStageFlags pipelineWaitStage, uint64_t waitForValue, uint64_t signalValue )
+void RunTimeApplication::submitCommandBuffers( vk::PipelineStageFlags pipelineWaitStage, uint64_t waitForValue, uint64_t signalValue )
 {
     vk::TimelineSemaphoreSubmitInfo TimelineSemaphoreSubmitInfo {
         .waitSemaphoreValueCount   = 1,
@@ -429,6 +528,8 @@ void RunTimeApplication::drawFrame()
         throw std::runtime_error("Failed to wait for the Draw Frame's fence!");
     app->device.logicalDevice.resetFences( *drawFrameFence[executingCommandBufferIndex] );
 
+    // uint64_t shadowWaitForValue = submissionTimelineSemaphoreValue;
+    // uint64_t shadowFinishValue = ++submissionTimelineSemaphoreValue;
     uint64_t computeWaitForValue = submissionTimelineSemaphoreValue;
     uint64_t computeFinishValue = ++submissionTimelineSemaphoreValue;
     uint64_t graphicsWaitForValue = submissionTimelineSemaphoreValue;
@@ -452,18 +553,43 @@ void RunTimeApplication::drawFrame()
     app->cullSystem.CullScene( app->allEntities );
     const std::vector<Entity*>& visibleEntities = app->cullSystem.getVisibleEntities();
 
-    prepareImageLayout( imageIndex ); // TODO: call begin rendering and end rendering once. Draw all images in one pass.
+    changeImageLayoutForRendering( imageIndex );
 
-    app->lightSystem.recordCommandBuffer( executingCommandBufferIndex, imageIndex, visibleEntities );
+    renderDepthMap( visibleEntities );
 
-    for ( const Entity* entity : visibleEntities )
-    {
-        recordEntityCommandBuffers( imageIndex, entity, true ); // TODO: Add a debug switch instead of TRUE to allow bounding boxes to be rendered while the object itself is out of the frustum.
-    }
+    // THE INTERLUDE BARRIER -- BRIDGE BETWEEN 2 "PASSES"
+        // We need a barrier between -- previously, subpass dependencies would solve this, but alas!
+    vk::ImageMemoryBarrier2 barrier = {
+        .srcStageMask        = vk::PipelineStageFlagBits2::eEarlyFragmentTests | vk::PipelineStageFlagBits2::eLateFragmentTests,
+            // AFTER the fragment shader executes: the EARLY is kinda weird BUT its because the fragment shader can get SKIPPED ENTIRELY if it fails the Z check (if the pixel is OBSCURED -- we do NOT need to render it/run it through the fragment shader)
+        .srcAccessMask       = vk::AccessFlagBits2::eDepthStencilAttachmentWrite, // Ensure the depth attachment was written to
 
-    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].endRendering();
+        .dstStageMask        = vk::PipelineStageFlagBits2::eFragmentShader, // We are waiting for src whenever we're executing the fragment shader.
+        .dstAccessMask       = vk::AccessFlagBits2::eShaderRead, // Specifically, before we read fragment data, ensure src finished writing to before we begin reading so we don't read bad data.
 
-    // Clean up everything below. The particles are just... no reason to include it, but I mean it's probably handy to keep in, so just yeah.
+        .oldLayout           = vk::ImageLayout::eDepthAttachmentOptimal, // THIS is the old layout because .prepareImageLayout() specified this for its rendering attachment info.
+        .newLayout           = vk::ImageLayout::eDepthStencilReadOnlyOptimal, // the layout specified in the shadow render pass' descriptor
+
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image               = app->lightSystem.depthRenderPass.depthShadowMapAttachment.image, // the image we need to be waiting for and operating on
+        .subresourceRange    = {
+            .aspectMask     = vk::ImageAspectFlagBits::eDepth,
+            .baseMipLevel   = 0,
+            .levelCount     = 1,
+            .baseArrayLayer = 0,
+            .layerCount     = 1 } };
+
+    vk::DependencyInfo dependency_info = {
+        .dependencyFlags         = {},
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers    = &barrier };
+
+    app->cmdBuffers.commandBuffers[executingCommandBufferIndex].pipelineBarrier2( dependency_info );
+
+    // TODO: add textures to the vertex.
+    renderShadowScene( imageIndex, visibleEntities );
+
     if ( toggle_c )
     {
         recordCameraFrustumBoundingCommandBuffer( imageIndex );
@@ -479,7 +605,7 @@ void RunTimeApplication::drawFrame()
 
     app->cmdBuffers.commandBuffers[executingCommandBufferIndex].end();
 
-    submitCommandBuffers( imageIndex, vk::PipelineStageFlagBits::eColorAttachmentOutput, graphicsWaitForValue, graphicsFinishValue );
+    submitCommandBuffers( vk::PipelineStageFlagBits::eColorAttachmentOutput, graphicsWaitForValue, graphicsFinishValue );
     presentToWindow( imageIndex, graphicsFinishValue );
 }
 
