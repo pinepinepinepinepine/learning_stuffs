@@ -540,9 +540,7 @@ void RunTimeApplication::drawFrame()
     updateWireMVPUBOBuffer();
 
     // Add the light update here, it's currently in updateMVPUBOBuffer because time is calculated there and it's convenient.
-    app->lightSystem.updateUniformBuffers( executingCommandBufferIndex, app->camera.GetComponent<CameraComponent>() );
-
-    glm::vec3 guh = app->camera.GetComponent<TransformComponent>()->GetPosition();
+    app->lightSystem.updateUniformBuffers( executingCommandBufferIndex, currentCamera->GetComponent<CameraComponent>() );
 
     app->cullSystem.CullScene( app->allEntities );
 
